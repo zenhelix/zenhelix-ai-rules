@@ -1,91 +1,116 @@
 ---
-description: 'Sync documentation with the codebase, generating from source-of-truth files'
+description: "Sync documentation with the codebase, generating from source-of-truth files"
 targets: ["claudecode"]
 ---
 
-# Update Documentation
+# Update Docs Command
 
-Sync documentation with the codebase, generating from source-of-truth files.
+## Purpose
 
-## Step 1: Identify Sources of Truth
+Automatically synchronize documentation with the current codebase state.
+Generates documentation from source-of-truth files like build configurations,
+API specs, and Dockerfiles. Flags stale documentation and preserves
+manually-written content.
 
-| Source                              | Generates                          |
-|-------------------------------------|------------------------------------|
-| `package.json` scripts              | Available commands reference       |
-| `.env.example`                      | Environment variable documentation |
-| `openapi.yaml` / route files        | API endpoint reference             |
-| Source code exports                 | Public API documentation           |
-| `Dockerfile` / `docker-compose.yml` | Infrastructure setup docs          |
+## When to Use
 
-## Step 2: Generate Script Reference
+- After changing public APIs or endpoints
+- After updating dependencies or build configuration
+- After modifying Docker setup or deployment config
+- When documentation is flagged as outdated (>90 days since last update)
+- As part of the `/orchestrate` workflow before PR creation
 
-1. Read `package.json` (or `Makefile`, `Cargo.toml`, `pyproject.toml`)
-2. Extract all scripts/commands with their descriptions
-3. Generate a reference table:
+## Workflow
 
-```markdown
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start development server with hot reload |
-| `npm run build` | Production build with type checking |
-| `npm test` | Run test suite with coverage |
+### Step 1: Identify Source-of-Truth Files
+
+Scan the project for documentation sources:
+
+- `build.gradle.kts` / `pom.xml` — Project metadata, dependencies, versions
+- `openapi.yaml` / `swagger.json` — API endpoint documentation
+- `Dockerfile` / `docker-compose.yml` — Deployment and environment docs
+- `application.yml` / `application.properties` — Configuration reference
+- Source code annotations — `@Api`, `@Operation`, KDoc/Javadoc
+
+### Step 2: Detect Documentation Drift
+
+Compare documentation against source-of-truth:
+
+- API docs mention endpoints that no longer exist
+- README references outdated dependency versions
+- Configuration docs list properties that have been removed
+- Changelog has not been updated for recent changes
+
+### Step 3: Generate Updated Documentation
+
+For each documentation target:
+
+#### README.md
+
+- Update project description from build metadata
+- Update dependency versions table
+- Update build/run instructions if scripts changed
+- Preserve manually-written sections (marked with `<!-- manual -->`)
+
+#### API Documentation
+
+- Regenerate endpoint list from OpenAPI spec or controller annotations
+- Update request/response examples
+- Flag deprecated endpoints
+- Update authentication requirements
+
+#### Configuration Reference
+
+- List all configuration properties with types and defaults
+- Mark required vs optional properties
+- Group by feature/module
+
+### Step 4: Flag Stale Documentation
+
+- Check git blame dates on all documentation files
+- Flag any file not updated in >90 days
+- Cross-reference with code changes in the same period
+- Report files that likely need manual review
+
+### Step 5: Present Changes
+
+- Show diff of all documentation changes
+- Highlight sections that were auto-generated vs preserved
+- Wait for user confirmation before writing files
+
+## Output Format
+
 ```
+## Documentation Update Report
 
-## Step 3: Generate Environment Documentation
+### Sources Analyzed
+- build.gradle.kts — version 2.3.1 (was 2.2.0 in docs)
+- openapi.yaml — 3 new endpoints, 1 removed
+- Dockerfile — base image updated
 
-1. Read `.env.example` (or `.env.template`, `.env.sample`)
-2. Extract all variables with their purposes
-3. Categorize as required vs optional
-4. Document expected format and valid values
+### Changes Made
+| File | Section | Change |
+|------|---------|--------|
+| README.md | Dependencies | Updated version table |
+| API.md | /api/users | Added POST endpoint |
+| CONFIG.md | database | New pool-size property |
 
-```markdown
-| Variable | Required | Description | Example |
-|----------|----------|-------------|---------|
-| `DATABASE_URL` | Yes | PostgreSQL connection string | `postgres://user:pass@host:5432/db` |
-| `LOG_LEVEL` | No | Logging verbosity (default: info) | `debug`, `info`, `warn`, `error` |
-```
+### Stale Documentation (>90 days)
+- DEPLOYMENT.md — last updated 142 days ago, 8 code changes since
 
-## Step 4: Update Contributing Guide
-
-Generate or update `docs/CONTRIBUTING.md` with:
-
-- Development environment setup (prerequisites, install steps)
-- Available scripts and their purposes
-- Testing procedures (how to run, how to write new tests)
-- Code style enforcement (linter, formatter, pre-commit hooks)
-- PR submission checklist
-
-## Step 5: Update Runbook
-
-Generate or update `docs/RUNBOOK.md` with:
-
-- Deployment procedures (step-by-step)
-- Health check endpoints and monitoring
-- Common issues and their fixes
-- Rollback procedures
-- Alerting and escalation paths
-
-## Step 6: Staleness Check
-
-1. Find documentation files not modified in 90+ days
-2. Cross-reference with recent source code changes
-3. Flag potentially outdated docs for manual review
-
-## Step 7: Show Summary
-
-```
-Documentation Update
-──────────────────────────────
-Updated:  docs/CONTRIBUTING.md (scripts table)
-Updated:  docs/ENV.md (3 new variables)
-Flagged:  docs/DEPLOY.md (142 days stale)
-Skipped:  docs/API.md (no changes detected)
-──────────────────────────────
+### Preserved Manual Content
+- README.md: "Contributing" section (unchanged)
+- README.md: "Architecture" section (unchanged)
 ```
 
 ## Rules
 
-- **Single source of truth**: Always generate from code, never manually edit generated sections
-- **Preserve manual sections**: Only update generated sections; leave hand-written prose intact
-- **Mark generated content**: Use `<!-- AUTO-GENERATED -->` markers around generated sections
-- **Don't create docs unprompted**: Only create new doc files if the command explicitly requests it
+- NEVER overwrite manually-written documentation sections
+- ALWAYS generate from source-of-truth files, not from memory
+- Preserve existing formatting and style
+- Use project's documentation conventions (if any)
+- Flag conflicts between docs and code rather than silently fixing
+
+## Agent
+
+This command invokes the **doc-updater** agent for documentation analysis and generation.

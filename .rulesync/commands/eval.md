@@ -1,126 +1,145 @@
 ---
-description: 'Manage eval-driven development workflow'
+description: "Manage eval-driven development workflow"
 targets: ["claudecode"]
 ---
 
 # Eval Command
 
-Manage eval-driven development workflow.
+## Purpose
 
-## Usage
+Define, run, and track evaluations that measure whether the AI assistant
+produces correct outputs for specific tasks. Supports both capability evals
+(can it do X?) and regression evals (does it still do X correctly?).
 
-`/eval [define|check|report|list] [feature-name]`
+## When to Use
 
-## Define Evals
+- When defining a new capability the assistant should have
+- After making changes to rules, skills, or prompts
+- To verify that improvements do not regress existing capabilities
+- As a quality metric for prompt/rule changes
 
-`/eval define feature-name`
+## Subcommands
 
-Create a new eval definition:
+### `eval define`
 
-1. Create `.claude/evals/feature-name.md` with template:
-
-```markdown
-## EVAL: feature-name
-Created: $(date)
-
-### Capability Evals
-- [ ] [Description of capability 1]
-- [ ] [Description of capability 2]
-
-### Regression Evals
-- [ ] [Existing behavior 1 still works]
-- [ ] [Existing behavior 2 still works]
-
-### Success Criteria
-- pass@3 > 90% for capability evals
-- pass^3 = 100% for regression evals
-```
-
-2. Prompt user to fill in specific criteria
-
-## Check Evals
-
-`/eval check feature-name`
-
-Run evals for a feature:
-
-1. Read eval definition from `.claude/evals/feature-name.md`
-2. For each capability eval:
-    - Attempt to verify criterion
-    - Record PASS/FAIL
-    - Log attempt in `.claude/evals/feature-name.log`
-3. For each regression eval:
-    - Run relevant tests
-    - Compare against baseline
-    - Record PASS/FAIL
-4. Report current status:
+Create a new evaluation:
 
 ```
-EVAL CHECK: feature-name
-========================
-Capability: X/Y passing
-Regression: X/Y passing
-Status: IN PROGRESS / READY
+/eval define <name>
 ```
 
-## Report Evals
+Prompts for:
 
-`/eval report feature-name`
+- **Description**: What capability is being tested
+- **Type**: `capability` (new ability) or `regression` (existing behavior)
+- **Input**: The prompt or scenario to test
+- **Expected output**: What correct behavior looks like
+- **Grading criteria**: How to score (exact match, contains, semantic, manual)
+- **Tags**: Categorization labels
 
-Generate comprehensive eval report:
+Saves eval definition to `.claude/evals/<name>.yaml`:
 
-```
-EVAL REPORT: feature-name
-=========================
-Generated: $(date)
-
-CAPABILITY EVALS
-----------------
-[eval-1]: PASS (pass@1)
-[eval-2]: PASS (pass@2) - required retry
-[eval-3]: FAIL - see notes
-
-REGRESSION EVALS
-----------------
-[test-1]: PASS
-[test-2]: PASS
-[test-3]: PASS
-
-METRICS
--------
-Capability pass@1: 67%
-Capability pass@3: 100%
-Regression pass^3: 100%
-
-NOTES
------
-[Any issues, edge cases, or observations]
-
-RECOMMENDATION
---------------
-[SHIP / NEEDS WORK / BLOCKED]
+```yaml
+name: "<name>"
+type: "capability"
+description: "<description>"
+input: |
+  <the test prompt>
+expected: |
+  <expected output or behavior>
+grading:
+  method: "contains"  # exact | contains | semantic | manual
+  criteria:
+    - "must include error handling"
+    - "must use immutable patterns"
+tags: ["kotlin", "error-handling"]
 ```
 
-## List Evals
+### `eval check`
 
-`/eval list`
-
-Show all eval definitions:
+Run evaluations:
 
 ```
-EVAL DEFINITIONS
-================
-feature-auth      [3/5 passing] IN PROGRESS
-feature-search    [5/5 passing] READY
-feature-export    [0/4 passing] NOT STARTED
+/eval check              # Run all evals
+/eval check <name>       # Run a specific eval
+/eval check --tag=kotlin # Run evals with specific tag
 ```
 
-## Arguments
+For each eval:
 
-$ARGUMENTS:
+1. Execute the input prompt
+2. Capture the output
+3. Grade against expected output using the specified method
+4. Record result (PASS / FAIL / PARTIAL)
 
-- `define <name>` - Create new eval definition
-- `check <name>` - Run and check evals
-- `report <name>` - Generate full report
-- `list` - Show all evals
-- `clean` - Remove old eval logs (keeps last 10 runs)
+### `eval report`
+
+Show evaluation metrics:
+
+```
+/eval report
+```
+
+Output:
+
+```
+## Eval Report
+
+### Summary
+- Total evals: 24
+- Passing: 20 (83.3%)
+- Failing: 3 (12.5%)
+- Partial: 1 (4.2%)
+
+### By Type
+- Capability: 15/18 passing (83.3%)
+- Regression: 5/6 passing (83.3%)
+
+### By Tag
+| Tag | Pass | Fail | Rate |
+|-----|------|------|------|
+| kotlin | 8/10 | 2 | 80% |
+| security | 5/5 | 0 | 100% |
+| api | 7/9 | 2 | 78% |
+
+### Failing Evals
+1. [FAIL] kotlin-null-safety — Expected null check, got unsafe cast
+2. [FAIL] api-pagination — Missing offset parameter
+3. [FAIL] error-handling-service — Swallowed exception
+```
+
+### `eval list`
+
+List all defined evals:
+
+```
+/eval list
+/eval list --tag=security
+/eval list --type=regression
+```
+
+## Workflow Integration
+
+### Capability-Driven Development
+
+1. Define eval for the desired capability
+2. Run eval — confirm it FAILS (capability does not exist yet)
+3. Implement the capability (update rules, skills, prompts)
+4. Run eval — confirm it PASSES
+5. Add as regression eval to prevent future breakage
+
+### Regression Prevention
+
+1. Before changing rules or skills, run all regression evals
+2. Make changes
+3. Re-run regression evals
+4. If any regress, fix before proceeding
+
+## Rules
+
+- Eval definitions are stored in version control
+- NEVER modify eval expected output to make a failing eval pass
+- ALWAYS investigate failing evals — they indicate real problems
+- Keep eval inputs realistic (use actual user scenarios)
+- Tag evals thoroughly for filtered execution
+- Review eval definitions periodically for relevance

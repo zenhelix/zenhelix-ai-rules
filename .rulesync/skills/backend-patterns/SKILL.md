@@ -1,586 +1,432 @@
 ---
 name: backend-patterns
-description: "Backend architecture patterns, API design, database optimization, and server-side best practices for Spring Boot with Kotlin and Java."
+description: "Backend architecture: layered design, caching, error handling, retry, rate limiting, logging"
 targets: ["claudecode"]
 claudecode:
   model: sonnet
-  allowed-tools: ["Read", "Grep", "Glob"]
 ---
 
-# Backend Development Patterns
+# Backend Architecture Patterns
 
-Backend architecture patterns and best practices for scalable server-side applications.
+## Layered Architecture
 
-## When to Activate
-
-- Designing REST or GraphQL API endpoints
-- Implementing repository, service, or controller layers
-- Optimizing database queries (N+1, indexing, connection pooling)
-- Adding caching (Redis, in-memory, Spring Cache)
-- Setting up background jobs or async processing
-- Structuring error handling and validation for APIs
-- Building filters, interceptors, or Spring Security configurations
-
-## API Design Patterns
-
-### RESTful API Structure
-
-```kotlin
-// Resource-based URLs
-GET    /api/markets                 # List resources
-GET    /api/markets/:id             # Get single resource
-POST   /api/markets                 # Create resource
-PUT    /api/markets/:id             # Replace resource
-PATCH  /api/markets/:id             # Update resource
-DELETE /api/markets/:id             # Delete resource
-
-// Query parameters for filtering, sorting, pagination
-GET /api/markets?status=active&sort=volume&limit=20&offset=0
+```
+Controller (HTTP layer)
+    ↓ DTO / Request objects
+Service (Business logic)
+    ↓ Domain entities
+Repository (Data access)
+    ↓ SQL / JPA
+Database
 ```
 
-### Repository Pattern
+Rules:
+
+- Controllers handle HTTP concerns only (request parsing, response formatting, status codes)
+- Services contain business logic, transaction boundaries, orchestration
+- Repositories handle data access only
+- No upward dependencies (Repository must not know about Controller)
+- Use DTOs between layers to avoid leaking internal representations
+
+## RESTful API Structure
 
 ```kotlin
-// Abstract data access logic
-interface MarketRepository : JpaRepository<Market, String> {
+@RestController
+@RequestMapping("/api/v1/users")
+class UserController(private val userService: UserService) {
 
-    fun findByStatus(status: MarketStatus): List<Market>
+    @GetMapping
+    fun findAll(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int,
+    ): Page<UserResponse> =
+        userService.findAll(PageRequest.of(page, size)).map(User::toResponse)
 
-    @Query("SELECT m FROM Market m WHERE m.status = :status ORDER BY m.volume DESC")
-    fun findByStatusOrderByVolumeDesc(
-        @Param("status") status: MarketStatus,
-        pageable: Pageable
-    ): Page<Market>
-}
+    @GetMapping("/{id}")
+    fun findById(@PathVariable id: Long): UserResponse =
+        userService.findById(id).toResponse()
 
-// Custom repository for complex queries
-interface MarketRepositoryCustom {
-    fun findAllWithFilters(filters: MarketFilters): List<Market>
-}
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    fun create(@Valid @RequestBody request: CreateUserRequest): UserResponse =
+        userService.create(request).toResponse()
 
-class MarketRepositoryCustomImpl(
-    private val entityManager: EntityManager
-) : MarketRepositoryCustom {
+    @PutMapping("/{id}")
+    fun update(
+        @PathVariable id: Long,
+        @Valid @RequestBody request: UpdateUserRequest,
+    ): UserResponse =
+        userService.update(id, request).toResponse()
 
-    override fun findAllWithFilters(filters: MarketFilters): List<Market> {
-        val cb = entityManager.criteriaBuilder
-        val query = cb.createQuery(Market::class.java)
-        val root = query.from(Market::class.java)
-        val predicates = mutableListOf<Predicate>()
-
-        filters.status?.let {
-            predicates.add(cb.equal(root.get<MarketStatus>("status"), it))
-        }
-
-        query.where(*predicates.toTypedArray())
-
-        return entityManager.createQuery(query)
-            .setMaxResults(filters.limit ?: 20)
-            .resultList
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun delete(@PathVariable id: Long) {
+        userService.delete(id)
     }
 }
 ```
 
-### Service Layer Pattern
-
-```kotlin
-// Business logic separated from data access
-@Service
-class MarketService(
-    private val marketRepository: MarketRepository,
-    private val embeddingService: EmbeddingService,
-    private val vectorSearchService: VectorSearchService
-) {
-
-    suspend fun searchMarkets(query: String, limit: Int = 10): List<Market> {
-        // Business logic
-        val embedding = embeddingService.generateEmbedding(query)
-        val results = vectorSearchService.search(embedding, limit)
-
-        // Fetch full data
-        val markets = marketRepository.findAllById(results.map { it.id })
-
-        // Sort by similarity
-        val scoreMap = results.associate { it.id to it.score }
-        return markets.sortedByDescending { scoreMap[it.id] ?: 0.0 }
-    }
-}
-```
-
-### Filter/Interceptor Pattern
-
-```kotlin
-// Request/response processing pipeline (replaces middleware)
-@Component
-class AuthenticationFilter(
-    private val tokenService: TokenService
-) : OncePerRequestFilter() {
-
-    override fun doFilterInternal(
-        request: HttpServletRequest,
-        response: HttpServletResponse,
-        filterChain: FilterChain
-    ) {
-        val token = request.getHeader("Authorization")?.removePrefix("Bearer ")
-
-        if (token == null) {
-            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized")
-            return
-        }
-
-        try {
-            val user = tokenService.verifyToken(token)
-            SecurityContextHolder.getContext().authentication =
-                UsernamePasswordAuthenticationToken(user, null, user.authorities)
-            filterChain.doFilter(request, response)
-        } catch (e: InvalidTokenException) {
-            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid token")
-        }
-    }
-}
-
-// HandlerInterceptor for cross-cutting concerns
-@Component
-class RequestLoggingInterceptor : HandlerInterceptor {
-
-    override fun preHandle(request: HttpServletRequest, response: HttpServletResponse, handler: Any): Boolean {
-        logger.info("Incoming request: {} {}", request.method, request.requestURI)
-        return true
-    }
-
-    override fun afterCompletion(
-        request: HttpServletRequest, response: HttpServletResponse,
-        handler: Any, ex: Exception?
-    ) {
-        logger.info("Completed: {} {} -> {}", request.method, request.requestURI, response.status)
-    }
-}
-```
-
-## Database Patterns
-
-### Query Optimization
-
-```kotlin
-// GOOD: Select only needed columns with projections
-interface MarketSummary {
-    val id: String
-    val name: String
-    val status: MarketStatus
-    val volume: Long
-}
-
-@Query("SELECT m.id as id, m.name as name, m.status as status, m.volume as volume " +
-       "FROM Market m WHERE m.status = :status ORDER BY m.volume DESC")
-fun findActiveSummaries(@Param("status") status: MarketStatus, pageable: Pageable): Page<MarketSummary>
-
-// BAD: Select everything
-fun findAll(): List<Market>
-```
-
-### N+1 Query Prevention
-
-```kotlin
-// BAD: N+1 query problem
-val markets = marketRepository.findAll()
-for (market in markets) {
-    market.creator = userRepository.findById(market.creatorId).orElse(null)  // N queries
-}
-
-// GOOD: Fetch join in JPQL
-@Query("SELECT m FROM Market m JOIN FETCH m.creator WHERE m.status = :status")
-fun findWithCreator(@Param("status") status: MarketStatus): List<Market>
-
-// GOOD: Batch fetch with @EntityGraph
-@EntityGraph(attributePaths = ["creator", "categories"])
-fun findByStatus(status: MarketStatus): List<Market>
-```
-
-### Transaction Pattern
+## Service Layer
 
 ```kotlin
 @Service
-class MarketService(
-    private val marketRepository: MarketRepository,
-    private val positionRepository: PositionRepository
+class UserService(
+    private val userRepository: UserRepository,
+    private val passwordEncoder: PasswordEncoder,
+    private val eventPublisher: ApplicationEventPublisher,
 ) {
+
+    @Transactional(readOnly = true)
+    fun findById(id: Long): User =
+        userRepository.findByIdOrNull(id)
+            ?: throw NotFoundException("User with id=$id not found")
+
+    @Transactional(readOnly = true)
+    fun findAll(pageable: Pageable): Page<User> =
+        userRepository.findAll(pageable)
 
     @Transactional
-    fun createMarketWithPosition(
-        marketData: CreateMarketDto,
-        positionData: CreatePositionDto
-    ): Market {
-        val market = marketRepository.save(
-            Market(
-                name = marketData.name,
-                description = marketData.description,
-                status = MarketStatus.ACTIVE
-            )
-        )
-
-        positionRepository.save(
-            Position(
-                marketId = market.id,
-                amount = positionData.amount,
-                side = positionData.side
-            )
-        )
-
-        return market
-        // Transaction commits automatically; rolls back on exception
-    }
-}
-```
-
-## Caching Strategies
-
-### Spring Cache with Redis
-
-```kotlin
-@Service
-class CachedMarketService(
-    private val marketRepository: MarketRepository
-) {
-
-    @Cacheable(value = ["markets"], key = "#id")
-    fun findById(id: String): Market? {
-        return marketRepository.findById(id).orElse(null)
-    }
-
-    @CacheEvict(value = ["markets"], key = "#id")
-    fun invalidateCache(id: String) {
-        // Cache entry removed
-    }
-
-    @CachePut(value = ["markets"], key = "#result.id")
-    fun updateMarket(id: String, data: UpdateMarketDto): Market {
-        val market = marketRepository.findById(id)
-            .orElseThrow { NotFoundException("Market not found: $id") }
-
-        val updated = market.copy(
-            name = data.name ?: market.name,
-            description = data.description ?: market.description
-        )
-
-        return marketRepository.save(updated)
-    }
-}
-```
-
-### Cache-Aside Pattern with RedisTemplate
-
-```kotlin
-@Service
-class MarketCacheService(
-    private val redisTemplate: RedisTemplate<String, Market>,
-    private val marketRepository: MarketRepository
-) {
-
-    fun getMarketWithCache(id: String): Market {
-        val cacheKey = "market:$id"
-
-        // Try cache
-        val cached = redisTemplate.opsForValue().get(cacheKey)
-        if (cached != null) return cached
-
-        // Cache miss - fetch from DB
-        val market = marketRepository.findById(id)
-            .orElseThrow { NotFoundException("Market not found") }
-
-        // Update cache with 5-minute TTL
-        redisTemplate.opsForValue().set(cacheKey, market, Duration.ofMinutes(5))
-
-        return market
-    }
-}
-```
-
-## Error Handling Patterns
-
-### Centralized Error Handler
-
-```kotlin
-// Custom exception hierarchy
-sealed class ApiException(
-    val statusCode: HttpStatus,
-    override val message: String,
-    cause: Throwable? = null
-) : RuntimeException(message, cause)
-
-class NotFoundException(message: String) : ApiException(HttpStatus.NOT_FOUND, message)
-class ValidationException(message: String) : ApiException(HttpStatus.BAD_REQUEST, message)
-class UnauthorizedException(message: String) : ApiException(HttpStatus.UNAUTHORIZED, message)
-class ForbiddenException(message: String) : ApiException(HttpStatus.FORBIDDEN, message)
-
-// Global exception handler
-@RestControllerAdvice
-class GlobalExceptionHandler {
-
-    @ExceptionHandler(ApiException::class)
-    fun handleApiException(ex: ApiException): ResponseEntity<ApiResponse<Nothing>> {
-        return ResponseEntity.status(ex.statusCode).body(
-            ApiResponse(success = false, error = ex.message)
-        )
-    }
-
-    @ExceptionHandler(MethodArgumentNotValidException::class)
-    fun handleValidation(ex: MethodArgumentNotValidException): ResponseEntity<ApiResponse<Nothing>> {
-        val errors = ex.bindingResult.fieldErrors
-            .map { "${it.field}: ${it.defaultMessage}" }
-
-        return ResponseEntity.badRequest().body(
-            ApiResponse(success = false, error = "Validation failed", details = errors)
-        )
-    }
-
-    @ExceptionHandler(Exception::class)
-    fun handleUnexpected(ex: Exception): ResponseEntity<ApiResponse<Nothing>> {
-        logger.error("Unexpected error", ex)
-
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
-            ApiResponse(success = false, error = "Internal server error")
-        )
-    }
-}
-
-// Usage in controller
-@GetMapping("/api/markets")
-fun getMarkets(): ResponseEntity<ApiResponse<List<Market>>> {
-    val markets = marketService.findAll()
-    return ResponseEntity.ok(ApiResponse(success = true, data = markets))
-}
-```
-
-### Retry with Exponential Backoff
-
-```kotlin
-// Using Spring Retry
-@Retryable(
-    value = [ServiceUnavailableException::class],
-    maxAttempts = 3,
-    backoff = Backoff(delay = 1000, multiplier = 2.0)
-)
-suspend fun fetchFromExternalApi(): ExternalData {
-    return externalApiClient.fetch()
-}
-
-@Recover
-fun recoverFromFetch(ex: ServiceUnavailableException): ExternalData {
-    logger.error("All retries exhausted for external API", ex)
-    throw ServiceException("External API unavailable after retries", ex)
-}
-
-// Manual retry with Kotlin coroutines
-suspend fun <T> withRetry(
-    maxRetries: Int = 3,
-    block: suspend () -> T
-): T {
-    var lastException: Exception? = null
-
-    repeat(maxRetries) { attempt ->
-        try {
-            return block()
-        } catch (e: Exception) {
-            lastException = e
-            if (attempt < maxRetries - 1) {
-                val delayMs = 1000L * 2.0.pow(attempt).toLong()
-                delay(delayMs)
-            }
+    fun create(request: CreateUserRequest): User {
+        if (userRepository.existsByEmail(request.email)) {
+            throw ConflictException("Email ${request.email} already in use")
         }
+        val user = User(
+            name = request.name,
+            email = request.email,
+            passwordHash = passwordEncoder.encode(request.password),
+        )
+        val saved = userRepository.save(user)
+        eventPublisher.publishEvent(UserCreatedEvent(saved.id!!))
+        return saved
     }
 
-    throw lastException!!
-}
+    @Transactional
+    fun update(id: Long, request: UpdateUserRequest): User {
+        val user = findById(id)
+        val updated = user.copy(
+            name = request.name ?: user.name,
+            email = request.email ?: user.email,
+        )
+        return userRepository.save(updated)
+    }
 
-// Usage
-val data = withRetry { fetchFromExternalApi() }
+    @Transactional
+    fun delete(id: Long) {
+        val user = findById(id)
+        userRepository.delete(user)
+    }
+}
 ```
 
-## Authentication & Authorization
+## Repository Pattern
 
-### Spring Security with JWT
+```kotlin
+interface UserRepository : JpaRepository<User, Long> {
+
+    fun existsByEmail(email: String): Boolean
+
+    fun findByEmail(email: String): User?
+
+    @Query("SELECT u FROM User u JOIN FETCH u.roles WHERE u.id = :id")
+    fun findByIdWithRoles(@Param("id") id: Long): User?
+
+    @EntityGraph(attributePaths = ["roles", "permissions"])
+    override fun findAll(pageable: Pageable): Page<User>
+}
+```
+
+## N+1 Prevention
+
+```kotlin
+// PROBLEM: N+1 queries
+@OneToMany(mappedBy = "user")
+val orders: List<Order> // each user triggers a separate query for orders
+
+// SOLUTION 1: JOIN FETCH in JPQL
+@Query("SELECT u FROM User u JOIN FETCH u.orders WHERE u.id = :id")
+fun findByIdWithOrders(id: Long): User?
+
+// SOLUTION 2: @EntityGraph
+@EntityGraph(attributePaths = ["orders"])
+fun findById(id: Long): User?
+
+// SOLUTION 3: @BatchSize on the collection
+@OneToMany(mappedBy = "user")
+@BatchSize(size = 50)
+val orders: List<Order>
+
+// SOLUTION 4: Projection/DTO query
+@Query("SELECT new com.example.dto.UserOrderSummary(u.name, COUNT(o)) FROM User u LEFT JOIN u.orders o GROUP BY u.name")
+fun findUserOrderSummaries(): List<UserOrderSummary>
+```
+
+## Transaction Patterns
+
+```kotlin
+// Read-only transaction: performance optimization, no dirty checking
+@Transactional(readOnly = true)
+fun findAll(): List<User>
+
+// Default: read-write transaction
+@Transactional
+fun create(request: CreateUserRequest): User
+
+// Propagation: REQUIRES_NEW for independent transaction
+@Transactional(propagation = Propagation.REQUIRES_NEW)
+fun logAuditEvent(event: AuditEvent)
+
+// Programmatic transaction (when annotation is insufficient)
+@Autowired
+lateinit var transactionTemplate: TransactionTemplate
+
+fun complexOperation() {
+    transactionTemplate.execute { status ->
+        // transactional code
+    }
+}
+```
+
+## Caching
+
+### Spring Cache with Caffeine
 
 ```kotlin
 @Configuration
-@EnableWebSecurity
-class SecurityConfig(
-    private val jwtTokenProvider: JwtTokenProvider
-) {
+@EnableCaching
+class CacheConfig {
 
     @Bean
-    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
-        return http
-            .csrf { it.disable() }
-            .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
-            .authorizeHttpRequests {
-                it.requestMatchers("/api/auth/**").permitAll()
-                it.requestMatchers("/api/admin/**").hasRole("ADMIN")
-                it.anyRequest().authenticated()
-            }
-            .addFilterBefore(JwtAuthenticationFilter(jwtTokenProvider), UsernamePasswordAuthenticationFilter::class.java)
+    fun cacheManager(): CacheManager = CaffeineCacheManager().apply {
+        setCaffeine(
+            Caffeine.newBuilder()
+                .maximumSize(1000)
+                .expireAfterWrite(Duration.ofMinutes(10))
+                .recordStats()
+        )
+    }
+}
+
+@Service
+class ProductService(private val productRepository: ProductRepository) {
+
+    @Cacheable(value = ["products"], key = "#id")
+    fun findById(id: Long): Product = productRepository.findByIdOrNull(id)
+        ?: throw NotFoundException("Product $id not found")
+
+    @CacheEvict(value = ["products"], key = "#id")
+    fun update(id: Long, request: UpdateProductRequest): Product { ... }
+
+    @CacheEvict(value = ["products"], allEntries = true)
+    fun clearCache() { }
+}
+```
+
+### Cache with Redis
+
+```kotlin
+@Configuration
+@EnableCaching
+class RedisCacheConfig {
+
+    @Bean
+    fun cacheManager(connectionFactory: RedisConnectionFactory): RedisCacheManager {
+        val defaultConfig = RedisCacheConfiguration.defaultCacheConfig()
+            .entryTtl(Duration.ofMinutes(30))
+            .serializeValuesWith(
+                RedisSerializationContext.SerializationPair.fromSerializer(
+                    GenericJackson2JsonRedisSerializer()
+                )
+            )
+            .disableCachingNullValues()
+
+        return RedisCacheManager.builder(connectionFactory)
+            .cacheDefaults(defaultConfig)
+            .withCacheConfiguration("products", defaultConfig.entryTtl(Duration.ofHours(1)))
             .build()
     }
 }
+```
 
-@Component
-class JwtTokenProvider(
-    @Value("\${jwt.secret}") private val secretKey: String
-) {
+## Error Handling
 
-    fun verifyToken(token: String): UserDetails {
-        return try {
-            val claims = Jwts.parserBuilder()
-                .setSigningKey(Keys.hmacShaKeyFor(secretKey.toByteArray()))
-                .build()
-                .parseClaimsJws(token)
-                .body
+### Exception Hierarchy
 
-            UserPrincipal(
-                userId = claims.subject,
-                email = claims["email"] as String,
-                role = claims["role"] as String
-            )
-        } catch (e: JwtException) {
-            throw UnauthorizedException("Invalid token")
+```kotlin
+sealed class DomainException(
+    message: String,
+    cause: Throwable? = null,
+) : RuntimeException(message, cause)
+
+class NotFoundException(message: String) : DomainException(message)
+class ValidationException(val errors: List<FieldError>) : DomainException("Validation failed")
+class ConflictException(message: String) : DomainException(message)
+class ForbiddenException(message: String) : DomainException(message)
+
+data class FieldError(val field: String, val message: String)
+```
+
+### Global Exception Handler
+
+```kotlin
+@RestControllerAdvice
+class GlobalExceptionHandler {
+
+    private val logger = LoggerFactory.getLogger(javaClass)
+
+    @ExceptionHandler(NotFoundException::class)
+    fun handleNotFound(ex: NotFoundException): ProblemDetail =
+        ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.message!!)
+
+    @ExceptionHandler(ConflictException::class)
+    fun handleConflict(ex: ConflictException): ProblemDetail =
+        ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.message!!)
+
+    @ExceptionHandler(ValidationException::class)
+    fun handleValidation(ex: ValidationException): ProblemDetail =
+        ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.message!!).apply {
+            setProperty("errors", ex.errors)
         }
+
+    @ExceptionHandler(MethodArgumentNotValidException::class)
+    fun handleBindingErrors(ex: MethodArgumentNotValidException): ProblemDetail {
+        val errors = ex.bindingResult.fieldErrors.map { FieldError(it.field, it.defaultMessage ?: "") }
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Validation failed").apply {
+            setProperty("errors", errors)
+        }
+    }
+
+    @ExceptionHandler(Exception::class)
+    fun handleUnexpected(ex: Exception): ProblemDetail {
+        logger.error("Unexpected error", ex)
+        return ProblemDetail.forStatusAndDetail(
+            HttpStatus.INTERNAL_SERVER_ERROR,
+            "An unexpected error occurred"
+        )
     }
 }
 ```
 
-### Role-Based Access Control
+## Retry with Resilience4j
 
 ```kotlin
-enum class Permission {
-    READ, WRITE, DELETE, ADMIN
-}
+@Service
+class PaymentService(private val paymentClient: PaymentClient) {
 
-enum class Role(val permissions: Set<Permission>) {
-    ADMIN(setOf(Permission.READ, Permission.WRITE, Permission.DELETE, Permission.ADMIN)),
-    MODERATOR(setOf(Permission.READ, Permission.WRITE, Permission.DELETE)),
-    USER(setOf(Permission.READ, Permission.WRITE))
-}
+    @Retry(name = "payment", fallbackMethod = "paymentFallback")
+    fun processPayment(request: PaymentRequest): PaymentResult =
+        paymentClient.charge(request)
 
-// Method-level security
-@PreAuthorize("hasRole('ADMIN')")
-@DeleteMapping("/api/markets/{id}")
-fun deleteMarket(@PathVariable id: String): ResponseEntity<ApiResponse<Nothing>> {
-    marketService.delete(id)
-    return ResponseEntity.ok(ApiResponse(success = true))
-}
-
-// Custom permission check
-@PreAuthorize("@permissionEvaluator.hasPermission(authentication, #id, 'MARKET', 'DELETE')")
-@DeleteMapping("/api/markets/{id}")
-fun deleteMarket(@PathVariable id: String): ResponseEntity<ApiResponse<Nothing>> {
-    marketService.delete(id)
-    return ResponseEntity.ok(ApiResponse(success = true))
+    fun paymentFallback(request: PaymentRequest, ex: Exception): PaymentResult {
+        logger.error("Payment failed after retries for order=${request.orderId}", ex)
+        return PaymentResult.Error(ex)
+    }
 }
 ```
 
-## Rate Limiting
+```yaml
+# application.yml
+resilience4j:
+  retry:
+    instances:
+      payment:
+        max-attempts: 3
+        wait-duration: 1s
+        exponential-backoff-multiplier: 2
+        retry-exceptions:
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+        ignore-exceptions:
+          - com.example.ValidationException
+```
 
-### Bucket4j Rate Limiter
+## Rate Limiting with Bucket4j
 
 ```kotlin
-@Component
-class RateLimitingFilter(
-    private val cacheManager: CacheManager
-) : OncePerRequestFilter() {
+@Configuration
+class RateLimitConfig {
+
+    @Bean
+    fun rateLimitFilter(): FilterRegistrationBean<RateLimitFilter> {
+        val registration = FilterRegistrationBean<RateLimitFilter>()
+        registration.filter = RateLimitFilter()
+        registration.addUrlPatterns("/api/*")
+        return registration
+    }
+}
+
+class RateLimitFilter : OncePerRequestFilter() {
+
+    private val buckets = ConcurrentHashMap<String, Bucket>()
 
     override fun doFilterInternal(
         request: HttpServletRequest,
         response: HttpServletResponse,
-        filterChain: FilterChain
+        filterChain: FilterChain,
     ) {
-        val ip = request.getHeader("X-Forwarded-For") ?: request.remoteAddr
-        val bucket = resolveBucket(ip)
+        val clientIp = request.remoteAddr
+        val bucket = buckets.computeIfAbsent(clientIp) { createBucket() }
 
         if (bucket.tryConsume(1)) {
             filterChain.doFilter(request, response)
         } else {
-            response.status = HttpServletResponse.SC_TOO_MANY_REQUESTS
-            response.writer.write("""{"success": false, "error": "Rate limit exceeded"}""")
+            response.status = HttpStatus.TOO_MANY_REQUESTS.value()
+            response.contentType = MediaType.APPLICATION_JSON_VALUE
+            response.writer.write("""{"error": "Rate limit exceeded"}""")
         }
     }
 
-    private fun resolveBucket(key: String): Bucket {
-        return Bucket4j.builder()
-            .addLimit(Bandwidth.classic(100, Refill.intervally(100, Duration.ofMinutes(1))))
-            .build()
+    private fun createBucket(): Bucket = Bucket.builder()
+        .addLimit(
+            BandwidthBuilder.builder()
+                .capacity(100)
+                .refillGreedy(100, Duration.ofMinutes(1))
+                .build()
+        )
+        .build()
+}
+```
+
+## Structured Logging
+
+```kotlin
+import org.slf4j.LoggerFactory
+import org.slf4j.MDC
+
+class UserService(private val repository: UserRepository) {
+
+    private val logger = LoggerFactory.getLogger(javaClass)
+
+    fun findById(id: Long): User {
+        MDC.put("userId", id.toString())
+        try {
+            logger.info("Fetching user")
+            val user = repository.findByIdOrNull(id)
+                ?: throw NotFoundException("User $id not found").also {
+                    logger.warn("User not found")
+                }
+            logger.debug("User found: name={}", user.name)
+            return user
+        } finally {
+            MDC.remove("userId")
+        }
     }
 }
 ```
 
-## Background Jobs & Queues
-
-### Spring Scheduling
+### MDC Filter for Request Tracing
 
 ```kotlin
 @Component
-class MarketIndexingJob(
-    private val marketService: MarketService,
-    private val indexService: IndexService
-) {
-
-    @Scheduled(fixedDelay = 60_000) // Every 60 seconds
-    fun reindexPendingMarkets() {
-        val pending = marketService.findPendingIndexing()
-
-        for (market in pending) {
-            try {
-                indexService.index(market)
-                marketService.markIndexed(market.id)
-            } catch (e: Exception) {
-                logger.error("Failed to index market: ${market.id}", e)
-            }
-        }
-    }
-}
-
-// Async processing with @Async
-@Service
-class AsyncMarketService(
-    private val indexService: IndexService
-) {
-
-    @Async
-    fun indexMarketAsync(marketId: String): CompletableFuture<Void> {
-        indexService.indexById(marketId)
-        return CompletableFuture.completedFuture(null)
-    }
-}
-
-// Controller usage
-@PostMapping("/api/markets")
-fun createMarket(@Valid @RequestBody request: CreateMarketRequest): ResponseEntity<ApiResponse<Market>> {
-    val market = marketService.create(request)
-
-    // Add to async queue instead of blocking
-    asyncMarketService.indexMarketAsync(market.id)
-
-    return ResponseEntity.status(HttpStatus.CREATED)
-        .body(ApiResponse(success = true, data = market))
-}
-```
-
-## Logging & Monitoring
-
-### Structured Logging with SLF4J + MDC
-
-```kotlin
-@Component
-class RequestContextFilter : OncePerRequestFilter() {
+class RequestIdFilter : OncePerRequestFilter() {
 
     override fun doFilterInternal(
         request: HttpServletRequest,
         response: HttpServletResponse,
-        filterChain: FilterChain
+        filterChain: FilterChain,
     ) {
-        val requestId = UUID.randomUUID().toString()
+        val requestId = request.getHeader("X-Request-ID") ?: UUID.randomUUID().toString()
         MDC.put("requestId", requestId)
-        MDC.put("method", request.method)
-        MDC.put("path", request.requestURI)
-
+        response.setHeader("X-Request-ID", requestId)
         try {
             filterChain.doFilter(request, response)
         } finally {
@@ -588,31 +434,68 @@ class RequestContextFilter : OncePerRequestFilter() {
         }
     }
 }
+```
 
-// Usage in service
-@Service
-class MarketService(
-    private val marketRepository: MarketRepository
-) {
+### Logback Pattern
 
-    private val logger = LoggerFactory.getLogger(MarketService::class.java)
+```xml
+<pattern>%d{ISO8601} [%thread] %-5level %logger{36} [%X{requestId}] [%X{userId}] - %msg%n</pattern>
+```
 
-    fun findAll(): List<Market> {
-        logger.info("Fetching all markets")
+## Background Jobs
 
-        return try {
-            val markets = marketRepository.findAll()
-            logger.info("Found {} markets", markets.size)
-            markets
-        } catch (e: Exception) {
-            logger.error("Failed to fetch markets", e)
-            throw ServiceException("Failed to fetch markets", e)
-        }
+```kotlin
+@Configuration
+@EnableScheduling
+@EnableAsync
+class AsyncConfig {
+
+    @Bean
+    fun taskExecutor(): TaskExecutor = ThreadPoolTaskExecutor().apply {
+        corePoolSize = 5
+        maxPoolSize = 10
+        queueCapacity = 100
+        setThreadNamePrefix("async-")
+        initialize()
     }
 }
 
-// logback-spring.xml for structured JSON output
-// <encoder class="net.logstash.logback.encoder.LogstashEncoder"/>
+@Service
+class ReportService(private val reportRepository: ReportRepository) {
+
+    @Scheduled(cron = "0 0 2 * * *") // daily at 2 AM
+    fun generateDailyReport() {
+        logger.info("Starting daily report generation")
+        // generate report
+    }
+
+    @Async
+    fun generateReportAsync(request: ReportRequest): CompletableFuture<Report> {
+        val report = generateReport(request)
+        return CompletableFuture.completedFuture(report)
+    }
+}
 ```
 
-**Remember**: Backend patterns enable scalable, maintainable server-side applications. Choose patterns that fit your complexity level.
+## Spring Security JWT Flow
+
+```kotlin
+@Configuration
+@EnableWebSecurity
+class SecurityConfig(private val jwtFilter: JwtAuthenticationFilter) {
+
+    @Bean
+    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain = http
+        .csrf { it.disable() }
+        .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+        .authorizeHttpRequests {
+            it
+                .requestMatchers("/api/v1/auth/**").permitAll()
+                .requestMatchers("/actuator/health").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/products/**").permitAll()
+                .anyRequest().authenticated()
+        }
+        .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter::class.java)
+        .build()
+}
+```

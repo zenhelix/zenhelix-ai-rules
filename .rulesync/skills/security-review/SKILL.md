@@ -1,530 +1,423 @@
 ---
 name: security-review
-description: "Use this skill when adding authentication, handling user input, working with secrets, creating API endpoints, or implementing payment/sensitive features. Provides comprehensive security checklist and patterns."
+description: "Security review: OWASP Top 10, Spring Security audit, dependency scanning, secrets detection"
 targets: ["claudecode"]
 claudecode:
   model: opus
   allowed-tools: ["Read", "Grep", "Glob", "Bash"]
 ---
 
-# Security Review Skill
-
-This skill ensures all code follows security best practices and identifies potential vulnerabilities.
+# Security Review
 
 ## When to Activate
 
-- Implementing authentication or authorization
-- Handling user input or file uploads
-- Creating new API endpoints
-- Working with secrets or credentials
-- Implementing payment features
-- Storing or transmitting sensitive data
-- Integrating third-party APIs
+Trigger a security review when changes involve:
 
-## Security Checklist
+- Authentication or authorization logic
+- User input handling (forms, query params, request bodies)
+- New API endpoints or route changes
+- Secrets, tokens, API keys, or credentials
+- Payment processing or financial data
+- File upload or download functionality
+- Database queries or schema changes
+- Third-party integrations
+- CORS or security header configuration
+- Session management changes
 
-### 1. Secrets Management
+## OWASP Top 10 Checklist for Spring Applications
 
-#### NEVER Do This
+### A01: Broken Access Control
 
-```typescript
-const apiKey = "sk-proj-xxxxx"  // Hardcoded secret
-const dbPassword = "password123" // In source code
-```
+- Verify `@PreAuthorize` / `@Secured` on all sensitive endpoints
+- Check that users cannot access other users' data (IDOR)
+- Verify role hierarchy is correctly configured
+- Ensure default-deny: `anyRequest().authenticated()` as the last rule
+- Test that disabled accounts cannot authenticate
 
-#### ALWAYS Do This
+```kotlin
+// VERIFY: proper authorization checks
+@PreAuthorize("hasRole('ADMIN') or #userId == authentication.principal.id")
+fun getUserProfile(userId: Long): UserProfile
 
-```typescript
-const apiKey = process.env.OPENAI_API_KEY
-const dbUrl = process.env.DATABASE_URL
-
-// Verify secrets exist
-if (!apiKey) {
-  throw new Error('OPENAI_API_KEY not configured')
-}
-```
-
-#### Verification Steps
-
-- [ ] No hardcoded API keys, tokens, or passwords
-- [ ] All secrets in environment variables
-- [ ] `.env.local` in .gitignore
-- [ ] No secrets in git history
-- [ ] Production secrets in hosting platform (Vercel, Railway)
-
-### 2. Input Validation
-
-#### Always Validate User Input
-
-```typescript
-import { z } from 'zod'
-
-// Define validation schema
-const CreateUserSchema = z.object({
-  email: z.string().email(),
-  name: z.string().min(1).max(100),
-  age: z.number().int().min(0).max(150)
-})
-
-// Validate before processing
-export async function createUser(input: unknown) {
-  try {
-    const validated = CreateUserSchema.parse(input)
-    return await db.users.create(validated)
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return { success: false, errors: error.errors }
+// VERIFY: no direct object reference without ownership check
+fun getOrder(orderId: Long): Order {
+    val order = orderRepository.findByIdOrNull(orderId)
+        ?: throw NotFoundException("Order not found")
+    val currentUserId = SecurityContextHolder.getContext().authentication.principal.id
+    if (order.userId != currentUserId && !hasRole("ADMIN")) {
+        throw ForbiddenException("Access denied")
     }
-    throw error
-  }
+    return order
 }
 ```
 
-#### File Upload Validation
+### A02: Cryptographic Failures
 
-```typescript
-function validateFileUpload(file: File) {
-  // Size check (5MB max)
-  const maxSize = 5 * 1024 * 1024
-  if (file.size > maxSize) {
-    throw new Error('File too large (max 5MB)')
-  }
+- Passwords stored with BCrypt (cost 12+) or Argon2id
+- Sensitive data encrypted at rest
+- TLS enforced for all external communications
+- No sensitive data in URLs or query parameters
+- No sensitive data in logs
 
-  // Type check
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif']
-  if (!allowedTypes.includes(file.type)) {
-    throw new Error('Invalid file type')
-  }
+```kotlin
+// GOOD: BCrypt with strength 12
+@Bean
+fun passwordEncoder(): PasswordEncoder = BCryptPasswordEncoder(12)
 
-  // Extension check
-  const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif']
-  const extension = file.name.toLowerCase().match(/\.[^.]+$/)?.[0]
-  if (!extension || !allowedExtensions.includes(extension)) {
-    throw new Error('Invalid file extension')
-  }
+// BETTER: Argon2id
+@Bean
+fun passwordEncoder(): PasswordEncoder = Argon2PasswordEncoder.defaultsForSpringSecurity_v5_8()
+```
 
-  return true
+### A03: Injection
+
+#### SQL Injection
+
+```kotlin
+// VULNERABLE: string concatenation
+@Query("SELECT u FROM User u WHERE u.name = '" + name + "'")  // NEVER DO THIS
+
+// SAFE: parameterized queries
+@Query("SELECT u FROM User u WHERE u.name = :name")
+fun findByName(@Param("name") name: String): User?
+
+// SAFE: JPA method queries
+fun findByEmailAndStatus(email: String, status: UserStatus): User?
+
+// SAFE: jOOQ (parameterized by default)
+dsl.selectFrom(USERS).where(USERS.EMAIL.eq(email)).fetchOne()
+
+// SAFE: JDBC with PreparedStatement
+connection.prepareStatement("SELECT * FROM users WHERE id = ?").use { stmt ->
+    stmt.setLong(1, id)
+    stmt.executeQuery()
 }
 ```
 
-#### Verification Steps
+#### LDAP Injection
 
-- [ ] All user inputs validated with schemas
-- [ ] File uploads restricted (size, type, extension)
-- [ ] No direct use of user input in queries
-- [ ] Whitelist validation (not blacklist)
-- [ ] Error messages don't leak sensitive info
-
-### 3. SQL Injection Prevention
-
-#### NEVER Concatenate SQL
-
-```typescript
-// DANGEROUS - SQL Injection vulnerability
-const query = `SELECT * FROM users WHERE email = '${userEmail}'`
-await db.query(query)
+```kotlin
+// Sanitize LDAP special characters: *, (, ), \, NUL
+fun sanitizeLdapInput(input: String): String =
+    input.replace("\\", "\\\\")
+        .replace("*", "\\*")
+        .replace("(", "\\(")
+        .replace(")", "\\)")
+        .replace("\u0000", "")
 ```
 
-#### ALWAYS Use Parameterized Queries
+### A04: Insecure Design
 
-```typescript
-// Safe - parameterized query
-const { data } = await supabase
-  .from('users')
-  .select('*')
-  .eq('email', userEmail)
+- Review business logic for abuse scenarios
+- Validate all state transitions
+- Implement rate limiting on sensitive operations
+- Add account lockout after failed login attempts
 
-// Or with raw SQL
-await db.query(
-  'SELECT * FROM users WHERE email = $1',
-  [userEmail]
+### A05: Security Misconfiguration
+
+```kotlin
+// VERIFY: security headers configured
+@Bean
+fun securityFilterChain(http: HttpSecurity): SecurityFilterChain = http
+    .headers {
+        it.contentSecurityPolicy { csp ->
+            csp.policyDirectives("default-src 'self'; script-src 'self'; style-src 'self'")
+        }
+        it.frameOptions { fo -> fo.deny() }
+        it.httpStrictTransportSecurity { hsts ->
+            hsts.includeSubDomains(true)
+            hsts.maxAgeInSeconds(31536000)
+        }
+        it.contentTypeOptions { } // X-Content-Type-Options: nosniff
+    }
+    .build()
+```
+
+```yaml
+# VERIFY: no debug/dev settings in production
+spring:
+  jpa:
+    show-sql: false          # NEVER true in production
+    open-in-view: false      # Disable OSIV
+  devtools:
+    restart:
+      enabled: false         # Disable in production
+server:
+  error:
+    include-stacktrace: never
+    include-message: never   # Do not expose error details
+```
+
+### A06: Vulnerable and Outdated Components
+
+- Run OWASP Dependency-Check regularly
+- Configure Gradle plugin:
+
+```kotlin
+// build.gradle.kts
+plugins {
+    id("org.owasp.dependencycheck") version "10.0.3"
+}
+
+dependencyCheck {
+    failBuildOnCVSS = 7.0f
+    suppressionFile = "config/owasp-suppressions.xml"
+    analyzers.assemblyEnabled = false
+}
+```
+
+- Run: `./gradlew dependencyCheckAnalyze`
+- Also consider: Snyk (`snyk test --all-projects`)
+
+### A07: Identification and Authentication Failures
+
+```kotlin
+// VERIFY: proper authentication configuration
+@Bean
+fun securityFilterChain(http: HttpSecurity): SecurityFilterChain = http
+    .sessionManagement {
+        it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) // for JWT APIs
+    }
+    .build()
+
+// VERIFY: JWT token validation
+class JwtTokenProvider(
+    @Value("\${jwt.secret}") private val secret: String,
+    @Value("\${jwt.expiration-ms}") private val expirationMs: Long,
+) {
+    // Token must be validated: signature, expiration, issuer
+    fun validateToken(token: String): Boolean {
+        try {
+            val claims = Jwts.parserBuilder()
+                .setSigningKey(Keys.hmacShaKeyFor(secret.toByteArray()))
+                .build()
+                .parseClaimsJws(token)
+            return !claims.body.expiration.before(Date())
+        } catch (ex: JwtException) {
+            logger.warn("Invalid JWT token: ${ex.message}")
+            return false
+        }
+    }
+}
+```
+
+### A08: Software and Data Integrity Failures
+
+- Verify CI/CD pipeline integrity
+- Check that dependencies are from trusted sources
+- Use Gradle dependency verification: `gradle/verification-metadata.xml`
+- Sign release artifacts
+
+### A09: Security Logging and Monitoring Failures
+
+```kotlin
+// LOG security-relevant events
+logger.info("User login successful: userId={}", userId)
+logger.warn("Failed login attempt: email={}, ip={}", email, remoteAddr)
+logger.warn("Unauthorized access attempt: userId={}, resource={}", userId, resource)
+logger.info("Password changed: userId={}", userId)
+logger.warn("Account locked: userId={}, reason={}", userId, reason)
+
+// NEVER log sensitive data
+logger.info("User authenticated: email={}", email)  // OK
+logger.info("User authenticated: password={}", password)  // NEVER
+logger.info("Payment processed: cardNumber={}", cardNumber)  // NEVER
+logger.info("Token issued: token={}", token)  // NEVER
+```
+
+### A10: Server-Side Request Forgery (SSRF)
+
+```kotlin
+// VALIDATE URLs before making requests
+fun validateUrl(url: String): URI {
+    val uri = URI(url)
+    val host = InetAddress.getByName(uri.host)
+    require(!host.isLoopbackAddress) { "Loopback addresses not allowed" }
+    require(!host.isSiteLocalAddress) { "Private addresses not allowed" }
+    require(!host.isLinkLocalAddress) { "Link-local addresses not allowed" }
+    require(uri.scheme in listOf("http", "https")) { "Only HTTP(S) allowed" }
+    return uri
+}
+```
+
+## Secrets Management
+
+### Environment Variables
+
+```kotlin
+// Kotlin — reading secrets
+val dbPassword = System.getenv("DB_PASSWORD")
+    ?: throw IllegalStateException("DB_PASSWORD environment variable is required")
+
+// Spring — @Value with env fallback
+@Value("\${database.password:\${DB_PASSWORD:}}")
+private lateinit var dbPassword: String
+
+// Spring — @ConfigurationProperties (preferred)
+@ConfigurationProperties(prefix = "app.security")
+data class SecurityProperties(
+    val jwtSecret: String,
+    val jwtExpirationMs: Long = 3600000,
+    val bcryptStrength: Int = 12,
 )
 ```
 
-#### Verification Steps
+### Detecting Hardcoded Secrets
 
-- [ ] All database queries use parameterized queries
-- [ ] No string concatenation in SQL
-- [ ] ORM/query builder used correctly
-- [ ] Supabase queries properly sanitized
+Search patterns to audit:
 
-### 4. Authentication & Authorization
+```
+# API keys and tokens
+password\s*=\s*["'][^"']+["']
+secret\s*=\s*["'][^"']+["']
+api[_-]?key\s*=\s*["'][^"']+["']
+token\s*=\s*["'][^"']+["']
 
-#### JWT Token Handling
+# Connection strings with credentials
+jdbc:.*password=
+mongodb://.*:.*@
 
-```typescript
-// WRONG: localStorage (vulnerable to XSS)
-localStorage.setItem('token', token)
-
-// CORRECT: httpOnly cookies
-res.setHeader('Set-Cookie',
-  `token=${token}; HttpOnly; Secure; SameSite=Strict; Max-Age=3600`)
+# AWS/Cloud keys
+AKIA[0-9A-Z]{16}
 ```
 
-#### Authorization Checks
+Files to check:
 
-```typescript
-export async function deleteUser(userId: string, requesterId: string) {
-  // ALWAYS verify authorization first
-  const requester = await db.users.findUnique({
-    where: { id: requesterId }
-  })
+- `application.yml` / `application.properties`
+- `docker-compose.yml`
+- `*.env` files
+- Test configuration files
+- CI/CD pipeline definitions
 
-  if (requester.role !== 'admin') {
-    return NextResponse.json(
-      { error: 'Unauthorized' },
-      { status: 403 }
-    )
-  }
+## Input Validation
 
-  // Proceed with deletion
-  await db.users.delete({ where: { id: userId } })
+```kotlin
+// Bean Validation on request DTOs
+data class CreateUserRequest(
+    @field:NotBlank(message = "Name is required")
+    @field:Size(min = 2, max = 100, message = "Name must be 2-100 characters")
+    @field:Pattern(regexp = "^[a-zA-Z\\s-']+$", message = "Name contains invalid characters")
+    val name: String,
+
+    @field:NotBlank
+    @field:Email(message = "Invalid email format")
+    @field:Size(max = 255)
+    val email: String,
+
+    @field:NotBlank
+    @field:Size(min = 8, max = 128)
+    val password: String,
+)
+
+// Custom validator
+@Target(AnnotationTarget.FIELD)
+@Constraint(validatedBy = [SafeHtmlValidator::class])
+annotation class SafeHtml(
+    val message: String = "Contains unsafe HTML",
+    val groups: Array<KClass<*>> = [],
+    val payload: Array<KClass<out Payload>> = [],
+)
+
+class SafeHtmlValidator : ConstraintValidator<SafeHtml, String> {
+    override fun isValid(value: String?, context: ConstraintValidatorContext): Boolean {
+        if (value == null) return true
+        return !value.contains(Regex("<script|javascript:|on\\w+=", RegexOption.IGNORE_CASE))
+    }
 }
 ```
 
-#### Row Level Security (Supabase)
+## XSS Prevention
 
-```sql
--- Enable RLS on all tables
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+```kotlin
+// Content-Type headers prevent MIME sniffing
+// Spring Security sets X-Content-Type-Options: nosniff by default
 
--- Users can only view their own data
-CREATE POLICY "Users view own data"
-  ON users FOR SELECT
-  USING (auth.uid() = id);
+// CSP header blocks inline scripts
+.headers {
+    it.contentSecurityPolicy { csp ->
+        csp.policyDirectives("default-src 'self'; script-src 'self'; object-src 'none'")
+    }
+}
 
--- Users can only update their own data
-CREATE POLICY "Users update own data"
-  ON users FOR UPDATE
-  USING (auth.uid() = id);
+// HTML sanitization if accepting rich text
+fun sanitizeHtml(input: String): String =
+    Jsoup.clean(input, Safelist.basic())
 ```
 
-#### Verification Steps
+## CSRF Configuration
 
-- [ ] Tokens stored in httpOnly cookies (not localStorage)
-- [ ] Authorization checks before sensitive operations
-- [ ] Row Level Security enabled in Supabase
-- [ ] Role-based access control implemented
-- [ ] Session management secure
+```kotlin
+// Stateless JWT API: CSRF can be disabled
+http.csrf { it.disable() }
 
-### 5. XSS Prevention
-
-#### Sanitize HTML
-
-```typescript
-import DOMPurify from 'isomorphic-dompurify'
-
-// ALWAYS sanitize user-provided HTML
-function renderUserContent(html: string) {
-  const clean = DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'p'],
-    ALLOWED_ATTR: []
-  })
-  return <div dangerouslySetInnerHTML={{ __html: clean }} />
+// Session-based application: CSRF MUST be enabled
+http.csrf { csrf ->
+    csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+    csrf.csrfTokenRequestHandler(CsrfTokenRequestAttributeHandler())
 }
 ```
 
-#### Content Security Policy
+## CORS Configuration
 
-```typescript
-// next.config.js
-const securityHeaders = [
-  {
-    key: 'Content-Security-Policy',
-    value: `
-      default-src 'self';
-      script-src 'self' 'unsafe-eval' 'unsafe-inline';
-      style-src 'self' 'unsafe-inline';
-      img-src 'self' data: https:;
-      font-src 'self';
-      connect-src 'self' https://api.example.com;
-    `.replace(/\s{2,}/g, ' ').trim()
-  }
-]
-```
-
-#### Verification Steps
-
-- [ ] User-provided HTML sanitized
-- [ ] CSP headers configured
-- [ ] No unvalidated dynamic content rendering
-- [ ] React's built-in XSS protection used
-
-### 6. CSRF Protection
-
-#### CSRF Tokens
-
-```typescript
-import { csrf } from '@/lib/csrf'
-
-export async function POST(request: Request) {
-  const token = request.headers.get('X-CSRF-Token')
-
-  if (!csrf.verify(token)) {
-    return NextResponse.json(
-      { error: 'Invalid CSRF token' },
-      { status: 403 }
-    )
-  }
-
-  // Process request
+```kotlin
+@Bean
+fun corsConfigurationSource(): CorsConfigurationSource {
+    val config = CorsConfiguration().apply {
+        allowedOrigins = listOf("https://app.example.com") // NEVER use "*" with credentials
+        allowedMethods = listOf("GET", "POST", "PUT", "DELETE", "PATCH")
+        allowedHeaders = listOf("Authorization", "Content-Type")
+        allowCredentials = true
+        maxAge = 3600
+    }
+    val source = UrlBasedCorsConfigurationSource()
+    source.registerCorsConfiguration("/api/**", config)
+    return source
 }
 ```
 
-#### SameSite Cookies
+## Dependency Scanning
 
-```typescript
-res.setHeader('Set-Cookie',
-  `session=${sessionId}; HttpOnly; Secure; SameSite=Strict`)
-```
+### OWASP Dependency-Check (Gradle)
 
-#### Verification Steps
-
-- [ ] CSRF tokens on state-changing operations
-- [ ] SameSite=Strict on all cookies
-- [ ] Double-submit cookie pattern implemented
-
-### 7. Rate Limiting
-
-#### API Rate Limiting
-
-```typescript
-import rateLimit from 'express-rate-limit'
-
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // 100 requests per window
-  message: 'Too many requests'
-})
-
-// Apply to routes
-app.use('/api/', limiter)
-```
-
-#### Expensive Operations
-
-```typescript
-// Aggressive rate limiting for searches
-const searchLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 10, // 10 requests per minute
-  message: 'Too many search requests'
-})
-
-app.use('/api/search', searchLimiter)
-```
-
-#### Verification Steps
-
-- [ ] Rate limiting on all API endpoints
-- [ ] Stricter limits on expensive operations
-- [ ] IP-based rate limiting
-- [ ] User-based rate limiting (authenticated)
-
-### 8. Sensitive Data Exposure
-
-#### Logging
-
-```typescript
-// WRONG: Logging sensitive data
-console.log('User login:', { email, password })
-console.log('Payment:', { cardNumber, cvv })
-
-// CORRECT: Redact sensitive data
-console.log('User login:', { email, userId })
-console.log('Payment:', { last4: card.last4, userId })
-```
-
-#### Error Messages
-
-```typescript
-// WRONG: Exposing internal details
-catch (error) {
-  return NextResponse.json(
-    { error: error.message, stack: error.stack },
-    { status: 500 }
-  )
+```kotlin
+plugins {
+    id("org.owasp.dependencycheck") version "10.0.3"
 }
 
-// CORRECT: Generic error messages
-catch (error) {
-  console.error('Internal error:', error)
-  return NextResponse.json(
-    { error: 'An error occurred. Please try again.' },
-    { status: 500 }
-  )
+dependencyCheck {
+    failBuildOnCVSS = 7.0f
+    formats = listOf("HTML", "JSON")
+    outputDirectory = "${layout.buildDirectory.get()}/reports/dependency-check"
+    suppressionFile = "config/owasp-suppressions.xml"
 }
 ```
 
-#### Verification Steps
-
-- [ ] No passwords, tokens, or secrets in logs
-- [ ] Error messages generic for users
-- [ ] Detailed errors only in server logs
-- [ ] No stack traces exposed to users
-
-### 9. Blockchain Security (Solana)
-
-#### Wallet Verification
-
-```typescript
-import { verify } from '@solana/web3.js'
-
-async function verifyWalletOwnership(
-  publicKey: string,
-  signature: string,
-  message: string
-) {
-  try {
-    const isValid = verify(
-      Buffer.from(message),
-      Buffer.from(signature, 'base64'),
-      Buffer.from(publicKey, 'base64')
-    )
-    return isValid
-  } catch (error) {
-    return false
-  }
-}
-```
-
-#### Transaction Verification
-
-```typescript
-async function verifyTransaction(transaction: Transaction) {
-  // Verify recipient
-  if (transaction.to !== expectedRecipient) {
-    throw new Error('Invalid recipient')
-  }
-
-  // Verify amount
-  if (transaction.amount > maxAmount) {
-    throw new Error('Amount exceeds limit')
-  }
-
-  // Verify user has sufficient balance
-  const balance = await getBalance(transaction.from)
-  if (balance < transaction.amount) {
-    throw new Error('Insufficient balance')
-  }
-
-  return true
-}
-```
-
-#### Verification Steps
-
-- [ ] Wallet signatures verified
-- [ ] Transaction details validated
-- [ ] Balance checks before transactions
-- [ ] No blind transaction signing
-
-### 10. Dependency Security
-
-#### Regular Updates
+### Snyk Integration
 
 ```bash
-# Check for vulnerabilities
-npm audit
-
-# Fix automatically fixable issues
-npm audit fix
-
-# Update dependencies
-npm update
-
-# Check for outdated packages
-npm outdated
-```
-
-#### Lock Files
-
-```bash
-# ALWAYS commit lock files
-git add package-lock.json
-
-# Use in CI/CD for reproducible builds
-npm ci  # Instead of npm install
-```
-
-#### Verification Steps
-
-- [ ] Dependencies up to date
-- [ ] No known vulnerabilities (npm audit clean)
-- [ ] Lock files committed
-- [ ] Dependabot enabled on GitHub
-- [ ] Regular security updates
-
-## Security Testing
-
-### Automated Security Tests
-
-```typescript
-// Test authentication
-test('requires authentication', async () => {
-  const response = await fetch('/api/protected')
-  expect(response.status).toBe(401)
-})
-
-// Test authorization
-test('requires admin role', async () => {
-  const response = await fetch('/api/admin', {
-    headers: { Authorization: `Bearer ${userToken}` }
-  })
-  expect(response.status).toBe(403)
-})
-
-// Test input validation
-test('rejects invalid input', async () => {
-  const response = await fetch('/api/users', {
-    method: 'POST',
-    body: JSON.stringify({ email: 'not-an-email' })
-  })
-  expect(response.status).toBe(400)
-})
-
-// Test rate limiting
-test('enforces rate limits', async () => {
-  const requests = Array(101).fill(null).map(() =>
-    fetch('/api/endpoint')
-  )
-
-  const responses = await Promise.all(requests)
-  const tooManyRequests = responses.filter(r => r.status === 429)
-
-  expect(tooManyRequests.length).toBeGreaterThan(0)
-})
+snyk test --all-projects --severity-threshold=high
+snyk monitor --all-projects
 ```
 
 ## Pre-Deployment Security Checklist
 
-Before ANY production deployment:
-
-- [ ] **Secrets**: No hardcoded secrets, all in env vars
-- [ ] **Input Validation**: All user inputs validated
-- [ ] **SQL Injection**: All queries parameterized
-- [ ] **XSS**: User content sanitized
-- [ ] **CSRF**: Protection enabled
-- [ ] **Authentication**: Proper token handling
-- [ ] **Authorization**: Role checks in place
-- [ ] **Rate Limiting**: Enabled on all endpoints
-- [ ] **HTTPS**: Enforced in production
-- [ ] **Security Headers**: CSP, X-Frame-Options configured
-- [ ] **Error Handling**: No sensitive data in errors
-- [ ] **Logging**: No sensitive data logged
-- [ ] **Dependencies**: Up to date, no vulnerabilities
-- [ ] **Row Level Security**: Enabled in Supabase
-- [ ] **CORS**: Properly configured
-- [ ] **File Uploads**: Validated (size, type)
-- [ ] **Wallet Signatures**: Verified (if blockchain)
-
-## Resources
-
-- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
-- [Next.js Security](https://nextjs.org/docs/security)
-- [Supabase Security](https://supabase.com/docs/guides/auth)
-- [Web Security Academy](https://portswigger.net/web-security)
-
----
-
-**Remember**: Security is not optional. One vulnerability can compromise the entire platform. When in doubt, err on the side of caution.
+- [ ] No hardcoded secrets in source code or configuration
+- [ ] All endpoints have proper authentication and authorization
+- [ ] Input validation on all user-facing parameters
+- [ ] SQL injection prevention (parameterized queries only)
+- [ ] XSS prevention (CSP headers, output encoding)
+- [ ] CSRF protection enabled for session-based auth
+- [ ] CORS configured with specific origins (no wildcards with credentials)
+- [ ] Security headers configured (HSTS, CSP, X-Frame-Options)
+- [ ] Passwords stored with BCrypt(12+) or Argon2id
+- [ ] JWT tokens validated (signature, expiration, issuer)
+- [ ] Rate limiting on authentication and sensitive endpoints
+- [ ] No sensitive data in logs (passwords, tokens, PII)
+- [ ] OWASP Dependency-Check passes (no CVE >= 7.0)
+- [ ] Error responses do not leak internal details
+- [ ] TLS enforced for all external communication
+- [ ] Actuator endpoints secured or disabled in production
+- [ ] Debug/dev features disabled in production
+- [ ] File upload validated (type, size, content)
+- [ ] Account lockout after repeated failed logins
+- [ ] Audit logging for security-relevant events

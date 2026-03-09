@@ -27,6 +27,17 @@
         "@upstash/context7-mcp"
       ],
       "env": {}
+    },
+    "postgres": {
+      "description": "PostgreSQL schema analysis and query execution (read-only recommended)",
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "${POSTGRES_URL}"
+      ],
+      "env": {}
     }
   }
 }

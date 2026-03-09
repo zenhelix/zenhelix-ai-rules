@@ -1,25 +1,34 @@
 ---
 root: true
-targets: [ "claudecode" ]
-description: "Project overview and general development guidelines"
+targets: ["claudecode"]
+description: "Project overview: Kotlin/Java backend development with Spring, PostgreSQL, Gradle"
 globs: ["**/*"]
 ---
 
 # Project Overview
 
-## General Guidelines
+## Stack
 
-- Follow consistent naming conventions across all languages
-- Write self-documenting code with clear variable and function names
-- Prefer composition over inheritance
-- Use meaningful comments for complex business logic
-- Primary stack: Kotlin/Java (JVM ecosystem), but principles apply to any language
+- Languages: Kotlin, Java (JVM ecosystem)
+- Framework: Spring Boot (Web, WebFlux, Data JPA, Data R2DBC, Security, Batch, Cloud, Integration)
+- Database: PostgreSQL with Flyway/Liquibase migrations, jOOQ, JPA/Hibernate
+- Build: Gradle with Kotlin DSL
+- Testing: JUnit 5, MockK, Mockito, TestContainers, Spring Boot Test
+- Documentation: AsciiDoc, Markdown, Mermaid diagrams
 
-## Architecture Principles
-
+## Principles
 - Organize code by feature/domain, not by file type
-- Keep related files close together
-- Use dependency injection for better testability
-- Implement proper error handling at every layer
+- Prefer composition over inheritance
+- Immutability by default
+- Write self-documenting code with clear naming
+- Use dependency injection for testability
+- Handle errors at every layer
 - Follow single responsibility principle
-- Prefer immutability and pure functions where possible
+- Continuous documentation as part of development workflow
+
+## Architecture
+
+- Layered: Controller → Service → Repository
+- Clean separation of concerns
+- Domain-driven design where appropriate
+- API-first approach for external interfaces

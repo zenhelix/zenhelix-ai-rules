@@ -1,69 +1,108 @@
 ---
-description: 'Incrementally fix build and type errors with minimal, safe changes'
+description: "Incrementally fix build and type errors with minimal, safe changes"
 targets: ["claudecode"]
 ---
 
-# Build and Fix
+# Build Fix Command
 
-Incrementally fix build and type errors with minimal, safe changes.
+## Purpose
 
-## Step 1: Detect Build System
+Detect, diagnose, and incrementally fix build errors with minimal changes.
+Each fix is verified before moving to the next error, preventing cascading
+breakage from overly aggressive changes.
 
-Identify the project's build tool and run the build:
+## When to Use
 
-| Indicator                          | Build Command                      |
-|------------------------------------|------------------------------------|
-| `package.json` with `build` script | `npm run build` or `pnpm build`    |
-| `tsconfig.json` (TypeScript only)  | `npx tsc --noEmit`                 |
-| `Cargo.toml`                       | `cargo build 2>&1`                 |
-| `pom.xml`                          | `mvn compile`                      |
-| `build.gradle`                     | `./gradlew compileJava`            |
-| `go.mod`                           | `go build ./...`                   |
-| `pyproject.toml`                   | `python -m py_compile` or `mypy .` |
+- Build fails after code changes
+- Compilation errors in Kotlin or Java files
+- Gradle or Maven configuration errors
+- Dependency resolution failures
+- After merging branches with conflicts
 
-## Step 2: Parse and Group Errors
+## Workflow
 
-1. Run the build command and capture stderr
-2. Group errors by file path
-3. Sort by dependency order (fix imports/types before logic errors)
-4. Count total errors for progress tracking
+### Step 1: Detect Build System
 
-## Step 3: Fix Loop (One Error at a Time)
+- Check for `build.gradle.kts` or `build.gradle` (Gradle)
+- Check for `pom.xml` (Maven)
+- Identify multi-module structure if present
+- Determine Kotlin, Java, or mixed project
 
-For each error:
+### Step 2: Run Build and Capture Errors
 
-1. **Read the file** — Use Read tool to see error context (10 lines around the error)
-2. **Diagnose** — Identify root cause (missing import, wrong type, syntax error)
-3. **Fix minimally** — Use Edit tool for the smallest change that resolves the error
-4. **Re-run build** — Verify the error is gone and no new errors introduced
-5. **Move to next** — Continue with remaining errors
+- Execute build command: `./gradlew build` or `mvn compile`
+- Capture full error output
+- Parse errors into structured list:
+    - File path
+    - Line number
+    - Error type (syntax, type mismatch, unresolved reference, etc.)
+    - Error message
 
-## Step 4: Guardrails
+### Step 3: Group and Prioritize
 
-Stop and ask the user if:
+- Group errors by file
+- Identify root-cause errors (fix these first, dependent errors may resolve)
+- Priority order:
+    1. Import / dependency errors (may resolve many downstream errors)
+    2. Type errors and unresolved references
+    3. Syntax errors
+    4. Configuration errors
 
-- A fix introduces **more errors than it resolves**
-- The **same error persists after 3 attempts** (likely a deeper issue)
-- The fix requires **architectural changes** (not just a build fix)
-- Build errors stem from **missing dependencies** (need `npm install`, `cargo add`, etc.)
+### Step 4: Fix One at a Time
 
-## Step 5: Summary
+For each error (starting with highest priority):
 
-Show results:
+1. Read the file and surrounding context
+2. Determine the minimal fix
+3. Apply the fix
+4. Re-run build to verify
+5. If new errors appear, assess whether they are related
+6. Move to the next error
 
-- Errors fixed (with file paths)
-- Errors remaining (if any)
-- New errors introduced (should be zero)
-- Suggested next steps for unresolved issues
+### Step 5: Verify Clean Build
+
+- Run full build one final time
+- Run tests to ensure no regressions
+- Report results
 
 ## Recovery Strategies
 
-| Situation                   | Action                                                      |
-|-----------------------------|-------------------------------------------------------------|
-| Missing module/import       | Check if package is installed; suggest install command      |
-| Type mismatch               | Read both type definitions; fix the narrower type           |
-| Circular dependency         | Identify cycle with import graph; suggest extraction        |
-| Version conflict            | Check `package.json` / `Cargo.toml` for version constraints |
-| Build tool misconfiguration | Read config file; compare with working defaults             |
+| Error Type           | Strategy                                         |
+|----------------------|--------------------------------------------------|
+| Unresolved reference | Check imports, add missing dependency            |
+| Type mismatch        | Check expected vs actual types, add conversion   |
+| Missing override     | Add override or update interface                 |
+| Dependency conflict  | Check version alignment, use resolution strategy |
+| Gradle script error  | Validate DSL syntax, check plugin versions       |
+| Out of memory        | Increase Gradle heap in gradle.properties        |
+| Annotation processor | Verify kapt/ksp configuration                    |
 
-Fix one error at a time for safety. Prefer minimal diffs over refactoring.
+## Rules
+
+- NEVER make speculative bulk changes
+- Fix ONE error at a time and re-verify
+- Prefer minimal changes over rewrites
+- Do NOT change test expectations to fix build (fix source code)
+- If a fix would change public API, warn the user first
+- After 3 failed attempts on the same error, ask the user for guidance
+
+## Output Format
+
+```
+## Build Fix Report
+
+### Build System: Gradle (Kotlin DSL)
+### Initial Errors: <count>
+
+### Fix Log
+1. [file.kt:42] Unresolved reference 'UserDto' — Added import
+2. [file.kt:58] Type mismatch — Changed return type to List<User>
+3. ...
+
+### Result: BUILD SUCCESSFUL / STILL FAILING (<remaining> errors)
+### Tests: PASSED / FAILED (<count> failures)
+```
+
+## Agent
+
+This command invokes the **build-error-resolver** agent for diagnosis and fixing.

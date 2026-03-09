@@ -1,88 +1,102 @@
 ---
-description: 'Safely identify and remove dead code with test verification at every step'
+description: "Safely identify and remove dead code with test verification at every step"
 targets: ["claudecode"]
 ---
 
-# Refactor Clean
+# Refactor Clean Command
 
-Safely identify and remove dead code with test verification at every step.
+## Purpose
 
-## Step 1: Detect Dead Code
+Identify and safely remove dead code, unused imports, unreachable branches,
+and deprecated patterns. Every deletion is verified by running the test suite
+to ensure nothing breaks.
 
-Run analysis tools based on project type:
+## When to Use
 
-| Tool        | What It Finds                       | Command                |
-|-------------|-------------------------------------|------------------------|
-| knip        | Unused exports, files, dependencies | `npx knip`             |
-| depcheck    | Unused npm dependencies             | `npx depcheck`         |
-| ts-prune    | Unused TypeScript exports           | `npx ts-prune`         |
-| vulture     | Unused Python code                  | `vulture src/`         |
-| deadcode    | Unused Go code                      | `deadcode ./...`       |
-| cargo-udeps | Unused Rust dependencies            | `cargo +nightly udeps` |
+- During scheduled code maintenance
+- When file sizes grow beyond 800 lines
+- After removing a feature or deprecating an API
+- When static analysis reports unused code
+- Before a major refactoring effort (clean first)
 
-If no tool is available, use Grep to find exports with zero imports:
+## Workflow
 
-```
-# Find exports, then check if they're imported anywhere
-```
+### Step 1: Static Analysis Scan
 
-## Step 2: Categorize Findings
+Run available analysis tools:
 
-Sort findings into safety tiers:
+- **detekt** — Unused imports, dead code, complexity metrics
+- **SpotBugs** — Unreachable code, redundant null checks
+- **Gradle** — Unused dependencies via dependency analysis plugin
+- **IDE inspections** — If available via MCP tools
+- **Manual scan** — Unused private methods, unreferenced classes
 
-| Tier        | Examples                                           | Action                                          |
-|-------------|----------------------------------------------------|-------------------------------------------------|
-| **SAFE**    | Unused utilities, test helpers, internal functions | Delete with confidence                          |
-| **CAUTION** | Components, API routes, middleware                 | Verify no dynamic imports or external consumers |
-| **DANGER**  | Config files, entry points, type definitions       | Investigate before touching                     |
+### Step 2: Categorize Findings
 
-## Step 3: Safe Deletion Loop
+| Safety Level | Category                | Examples                                                     |
+|--------------|-------------------------|--------------------------------------------------------------|
+| SAFE         | Unused imports          | Import statements with no references                         |
+| SAFE         | Unused private members  | Private methods/fields never called                          |
+| MODERATE     | Unused internal members | Internal functions with no callers in module                 |
+| MODERATE     | Dead branches           | else-if or when branches that can never match                |
+| RISKY        | Unused public API       | Public methods with no callers (may have external consumers) |
+| RISKY        | Deprecated code         | @Deprecated methods still referenced elsewhere               |
 
-For each SAFE item:
+### Step 3: Atomic Deletion Cycle
 
-1. **Run full test suite** — Establish baseline (all green)
-2. **Delete the dead code** — Use Edit tool for surgical removal
-3. **Re-run test suite** — Verify nothing broke
-4. **If tests fail** — Immediately revert with `git checkout -- <file>` and skip this item
-5. **If tests pass** — Move to next item
+For each finding (starting with SAFE, then MODERATE):
 
-## Step 4: Handle CAUTION Items
+1. Remove the dead code
+2. Run `./gradlew test` (or equivalent)
+3. If tests PASS: keep the deletion, record it
+4. If tests FAIL: revert the deletion, flag as false positive
+5. Move to next finding
 
-Before deleting CAUTION items:
+### Step 4: Handle RISKY Findings
 
-- Search for dynamic imports: `import()`, `require()`, `__import__`
-- Search for string references: route names, component names in configs
-- Check if exported from a public package API
-- Verify no external consumers (check dependents if published)
+- Present RISKY findings to the user for confirmation
+- Check git history for recent usage (last 90 days)
+- Search for references in configuration files, scripts, documentation
+- Only delete with explicit user approval
 
-## Step 5: Consolidate Duplicates
+### Step 5: Report Results
 
-After removing dead code, look for:
+Summarize all changes made and their impact.
 
-- Near-duplicate functions (>80% similar) — merge into one
-- Redundant type definitions — consolidate
-- Wrapper functions that add no value — inline them
-- Re-exports that serve no purpose — remove indirection
-
-## Step 6: Summary
-
-Report results:
+## Output Format
 
 ```
-Dead Code Cleanup
-──────────────────────────────
-Deleted:   12 unused functions
-           3 unused files
-           5 unused dependencies
-Skipped:   2 items (tests failed)
-Saved:     ~450 lines removed
-──────────────────────────────
-All tests passing ✅
+## Refactor Clean Report
+
+### Scan Results
+- Total findings: <count>
+- SAFE: <count> | MODERATE: <count> | RISKY: <count>
+
+### Deletions Made
+| File | Type | Description | Lines Saved |
+|------|------|-------------|-------------|
+| UserService.kt | Unused import | java.util.Date | 1 |
+| OrderMapper.kt | Dead method | mapLegacyOrder() | 23 |
+
+### Skipped (RISKY — needs confirmation)
+- [UserController.kt] deprecatedEndpoint() — last used 120 days ago
+- [Utils.kt] formatPhoneNumber() — public, no internal callers
+
+### Summary
+- Files modified: <count>
+- Lines removed: <count>
+- Tests: ALL PASSING
 ```
 
 ## Rules
 
-- **Never delete without running tests first**
-- **One deletion at a time** — Atomic changes make rollback easy
-- **Skip if uncertain** — Better to keep dead code than break production
-- **Don't refactor while cleaning** — Separate concerns (clean first, refactor later)
+- NEVER delete code without running tests after each deletion
+- NEVER delete RISKY code without user confirmation
+- Revert immediately if tests fail
+- Keep deletions atomic (one logical change at a time)
+- Do not refactor structure in this command (use dedicated refactoring for that)
+- Commit after all safe deletions are verified
+
+## Agent
+
+This command invokes the **refactor-cleaner** agent for dead code identification.

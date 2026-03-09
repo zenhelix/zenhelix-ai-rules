@@ -1,175 +1,154 @@
 ---
-description: 'Analyze local git history to extract coding patterns and generate SKILL.md files. Local version of the Skill Creator GitHub App.'
+description: "Analyze local git history to extract coding patterns and generate SKILL.md files"
 targets: ["claudecode"]
 ---
 
-# /skill-create - Local Skill Generation
+# Skill Create Command
 
-Analyze your repository's git history to extract coding patterns and generate SKILL.md files that teach Claude your team's practices.
+## Purpose
 
-## Usage
+Analyze the local git history to identify recurring coding patterns, conventions,
+and workflows, then generate structured SKILL.md files that capture this knowledge.
+This is a local alternative to the GitHub App pattern extraction.
 
-```bash
-/skill-create                    # Analyze current repo
-/skill-create --commits 100      # Analyze last 100 commits
-/skill-create --output ./skills  # Custom output directory
-/skill-create --instincts        # Also generate instincts for continuous-learning-v2
-```
+## When to Use
 
-## What It Does
+- When setting up AI rules for an existing project
+- After accumulating significant git history (50+ commits)
+- To formalize team conventions into machine-readable skills
+- When onboarding new team members or AI assistants
+- Periodically to capture evolving project patterns
 
-1. **Parses Git History** - Analyzes commits, file changes, and patterns
-2. **Detects Patterns** - Identifies recurring workflows and conventions
-3. **Generates SKILL.md** - Creates valid Claude Code skill files
-4. **Optionally Creates Instincts** - For the continuous-learning-v2 system
+## Workflow
 
-## Analysis Steps
+### Step 1: Analyze Git History
 
-### Step 1: Gather Git Data
+Scan recent git history (default: last 200 commits) for patterns:
 
 ```bash
-# Get recent commits with file changes
-git log --oneline -n ${COMMITS:-200} --name-only --pretty=format:"%H|%s|%ad" --date=short
-
-# Get commit frequency by file
-git log --oneline -n 200 --name-only | grep -v "^$" | grep -v "^[a-f0-9]" | sort | uniq -c | sort -rn | head -20
-
-# Get commit message patterns
-git log --oneline -n 200 | cut -d' ' -f2- | head -50
+git log --oneline -200
+git log --stat -200
+git log --diff-filter=A -200  # Added files
+git log --diff-filter=M -200  # Modified files
 ```
 
-### Step 2: Detect Patterns
+Extract signals:
 
-Look for these pattern types:
+- **Commit conventions**: Message format, types used, scoping patterns
+- **File co-changes**: Files that are always modified together
+- **Recurring workflows**: Common sequences of file changes
+- **Architecture patterns**: Package structure, naming conventions
+- **Testing patterns**: Test file placement, naming, frameworks used
 
-| Pattern                | Detection Method                               |
-|------------------------|------------------------------------------------|
-| **Commit conventions** | Regex on commit messages (feat:, fix:, chore:) |
-| **File co-changes**    | Files that always change together              |
-| **Workflow sequences** | Repeated file change patterns                  |
-| **Architecture**       | Folder structure and naming conventions        |
-| **Testing patterns**   | Test file locations, naming, coverage          |
+### Step 2: Identify Patterns
 
-### Step 3: Generate SKILL.md
+| Pattern Type      | Signal                         | Example                                     |
+|-------------------|--------------------------------|---------------------------------------------|
+| Commit Convention | Consistent prefix format       | `feat(auth):`, `fix(api):`                  |
+| File Co-change    | Files always changed together  | `Entity + Repository + Migration`           |
+| Architecture      | Consistent package structure   | `controller/service/repository` layers      |
+| Testing           | Test file naming and placement | `*Test.kt` in `src/test/kotlin/`            |
+| Code Style        | Recurring code structures      | Data classes with companion factory methods |
+| Dependency        | Common library usage patterns  | Always using Mockk, never Mockito           |
 
-Output format:
+### Step 3: Generate SKILL.md Files
+
+For each identified pattern, create a SKILL.md file:
 
 ```markdown
 ---
-name: {repo-name}-patterns
-description: Coding patterns extracted from {repo-name}
-version: 1.0.0
-source: local-git-analysis
-analyzed_commits: {count}
+name: "<skill-name>"
+version: 1
+description: "<what this skill captures>"
+globs:
+  - "<relevant file patterns>"
+tags:
+  - "<tag>"
 ---
 
-# {Repo Name} Patterns
+# <Skill Name>
 
-## Commit Conventions
-{detected commit message patterns}
+## Pattern Description
+<What the pattern is and why it exists>
 
-## Code Architecture
-{detected folder structure and organization}
+## Rules
+- <Rule 1>
+- <Rule 2>
 
-## Workflows
-{detected repeating file change patterns}
+## Examples
 
-## Testing Patterns
-{detected test conventions}
+### Correct
+<example of correct application>
+
+### Incorrect
+<example of what to avoid>
+
+## Detected From
+- Commits analyzed: <count>
+- Confidence: HIGH/MEDIUM/LOW
+- First seen: <date>
+- Last seen: <date>
 ```
 
-### Step 4: Generate Instincts (if --instincts)
+### Step 4: Categorize and Place
 
-For continuous-learning-v2 integration:
+Organize generated skills by type:
 
-```yaml
----
-id: {repo}-commit-convention
-trigger: "when writing a commit message"
-confidence: 0.8
-domain: git
-source: local-repo-analysis
----
+- `skills/conventions/` — Commit messages, naming, style
+- `skills/architecture/` — Module structure, layering, patterns
+- `skills/testing/` — Test patterns, frameworks, coverage
+- `skills/workflow/` — Development workflow patterns
 
-# Use Conventional Commits
+### Step 5: Review and Confirm
 
-## Action
-Prefix commits with: feat:, fix:, chore:, docs:, test:, refactor:
+Present all generated skills for review:
 
-## Evidence
-- Analyzed {n} commits
-- {percentage}% follow conventional commit format
-```
+- Show each skill with confidence level
+- Highlight LOW confidence patterns for user judgment
+- Allow selective approval (accept some, reject others)
+- Write approved skills to the skills directory
 
-## Example Output
-
-Running `/skill-create` on a TypeScript project might produce:
-
-```markdown
----
-name: my-app-patterns
-description: Coding patterns from my-app repository
-version: 1.0.0
-source: local-git-analysis
-analyzed_commits: 150
----
-
-# My App Patterns
-
-## Commit Conventions
-
-This project uses **conventional commits**:
-- `feat:` - New features
-- `fix:` - Bug fixes
-- `chore:` - Maintenance tasks
-- `docs:` - Documentation updates
-
-## Code Architecture
+## Output Format
 
 ```
+## Skill Extraction Report
 
-src/
-├── components/ # React components (PascalCase.tsx)
-├── hooks/ # Custom hooks (use*.ts)
-├── utils/ # Utility functions
-├── types/ # TypeScript type definitions
-└── services/ # API and external services
+### Git History Analyzed
+- Commits scanned: 200
+- Date range: 2024-06-01 to 2024-12-15
+- Contributors: 4
 
+### Patterns Found: <count>
+
+| # | Skill | Type | Confidence | Commits |
+|---|-------|------|------------|---------|
+| 1 | conventional-commits | Convention | HIGH | 180/200 |
+| 2 | entity-repo-cochange | Co-change | HIGH | 45/50 |
+| 3 | mockk-testing | Testing | HIGH | 30/30 |
+| 4 | companion-factory | Code Style | MEDIUM | 12/20 |
+
+### Generated Files
+1. skills/conventions/conventional-commits.md
+2. skills/architecture/entity-repo-cochange.md
+3. skills/testing/mockk-testing.md
+4. skills/workflow/companion-factory.md
+
+### Approve? [all / 1,2,3 / none]
 ```
 
-## Workflows
+## Arguments
 
-### Adding a New Component
-1. Create `src/components/ComponentName.tsx`
-2. Add tests in `src/components/__tests__/ComponentName.test.tsx`
-3. Export from `src/components/index.ts`
+- No arguments — Analyze last 200 commits
+- `--depth=<n>` — Number of commits to analyze
+- `--since=<date>` — Only analyze commits after date
+- `--author=<name>` — Filter by author
+- `--dry-run` — Show patterns without generating files
 
-### Database Migration
-1. Modify `src/db/schema.ts`
-2. Run `pnpm db:generate`
-3. Run `pnpm db:migrate`
+## Rules
 
-## Testing Patterns
-
-- Test files: `__tests__/` directories or `.test.ts` suffix
-- Coverage target: 80%+
-- Framework: Vitest
-```
-
-## GitHub App Integration
-
-For advanced features (10k+ commits, team sharing, auto-PRs), use the [Skill Creator GitHub App](https://github.com/apps/skill-creator):
-
-- Install: [github.com/apps/skill-creator](https://github.com/apps/skill-creator)
-- Comment `/skill-creator analyze` on any issue
-- Receives PR with generated skills
-
-## Related Commands
-
-- `/instinct-import` - Import generated instincts
-- `/instinct-status` - View learned instincts
-- `/evolve` - Cluster instincts into skills/agents
-
----
-
-*Part of [Everything Claude Code](https://github.com/affaan-m/everything-claude-code)*
+- NEVER generate skills with LOW confidence without user approval
+- ALWAYS show generated skills before writing files
+- Prefer HIGH confidence patterns (>80% consistency in history)
+- Do not duplicate patterns already captured in existing skills
+- Include provenance data (which commits support the pattern)
+- Keep skills focused: one pattern per file

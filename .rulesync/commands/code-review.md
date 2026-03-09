@@ -1,48 +1,100 @@
 ---
-description: 'Comprehensive security and quality review of uncommitted changes'
+description: "Comprehensive security and quality review of uncommitted changes"
 targets: ["claudecode"]
 ---
 
-# Code Review
+# Code Review Command
 
-Comprehensive security and quality review of uncommitted changes:
+## Purpose
 
-1. Get changed files: git diff --name-only HEAD
+Perform a thorough review of all uncommitted changes, checking for security
+vulnerabilities, code quality issues, and adherence to project conventions.
+Generates a severity-based report and blocks on CRITICAL or HIGH findings.
 
-2. For each changed file, check for:
+## When to Use
 
-**Security Issues (CRITICAL):**
+- After writing or modifying code, before committing
+- As part of the `/orchestrate` workflow
+- When unsure about code quality of recent changes
+- Before creating a pull request
 
-- Hardcoded credentials, API keys, tokens
-- SQL injection vulnerabilities
-- XSS vulnerabilities
-- Missing input validation
-- Insecure dependencies
-- Path traversal risks
+## Review Dimensions
 
-**Code Quality (HIGH):**
+### 1. Security Review
 
-- Functions > 50 lines
-- Files > 800 lines
-- Nesting depth > 4 levels
-- Missing error handling
-- console.log statements
-- TODO/FIXME comments
-- Missing JSDoc for public APIs
+- **Credentials**: Hardcoded API keys, passwords, tokens, connection strings
+- **Injection**: SQL injection, command injection, XSS vectors
+- **Authentication**: Missing auth checks, broken access control
+- **Secrets in logs**: Sensitive data written to log output
+- **Dependencies**: Known CVEs in added or updated dependencies
+- **Error leakage**: Stack traces or internal details exposed to users
 
-**Best Practices (MEDIUM):**
+### 2. Code Quality Review
 
-- Mutation patterns (use immutable instead)
-- Emoji usage in code/comments
-- Missing tests for new code
-- Accessibility issues (a11y)
+- **Function size**: Flag functions exceeding 50 lines
+- **File size**: Flag files exceeding 800 lines
+- **Nesting depth**: Flag nesting deeper than 4 levels
+- **Error handling**: Missing catch blocks, swallowed exceptions
+- **Naming**: Unclear or misleading variable/function names
+- **Duplication**: Repeated logic that should be extracted
+- **Magic values**: Hardcoded numbers or strings without constants
 
-3. Generate report with:
-    - Severity: CRITICAL, HIGH, MEDIUM, LOW
-    - File location and line numbers
-    - Issue description
-    - Suggested fix
+### 3. Kotlin/Java Patterns
 
-4. Block commit if CRITICAL or HIGH issues found
+- **Null safety**: Missing null checks, unsafe casts, platform types
+- **Immutability**: Mutable state where immutable would suffice (val vs var, copy())
+- **Data classes**: Missing equals/hashCode, mutable properties in data classes
+- **Coroutines**: Missing structured concurrency, unhandled exceptions
+- **Collections**: Using mutable collections when immutable would work
 
-Never approve code with security vulnerabilities!
+### 4. Spring Patterns (if applicable)
+
+- **@Transactional**: Missing or misplaced transaction boundaries
+- **Validation**: Missing @Valid, unchecked request bodies
+- **Exception handling**: Missing @ControllerAdvice, raw exception responses
+- **Injection**: Field injection instead of constructor injection
+- **Configuration**: Secrets in application.yml instead of environment variables
+
+## Severity Levels
+
+| Severity | Action                 | Examples                                      |
+|----------|------------------------|-----------------------------------------------|
+| CRITICAL | MUST fix before commit | Hardcoded secrets, SQL injection, auth bypass |
+| HIGH     | MUST fix before commit | Missing error handling, unsafe null access    |
+| MEDIUM   | SHOULD fix, may defer  | Function too long, unclear naming             |
+| LOW      | Nice to fix            | Minor style issues, optional improvements     |
+| INFO     | Informational          | Suggestions, alternative approaches           |
+
+## Output Format
+
+```
+## Code Review Report
+
+### Summary
+- Files reviewed: <count>
+- Findings: <count by severity>
+- Verdict: PASS / BLOCKED (if CRITICAL or HIGH exist)
+
+### CRITICAL
+- [FILE:LINE] <description> — <fix suggestion>
+
+### HIGH
+- [FILE:LINE] <description> — <fix suggestion>
+
+### MEDIUM
+- [FILE:LINE] <description>
+
+### LOW / INFO
+- [FILE:LINE] <description>
+```
+
+## Behavior
+
+- Reviews ONLY changed files (staged + unstaged in git diff)
+- Groups findings by file for easy navigation
+- If CRITICAL or HIGH findings exist, the review verdict is BLOCKED
+- Suggests specific fixes, not just descriptions of problems
+
+## Agent
+
+This command invokes the **code-reviewer** and **security-reviewer** agents in parallel.

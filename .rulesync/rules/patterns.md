@@ -1,41 +1,59 @@
 ---
 root: false
 targets: ["claudecode"]
-description: "Common patterns: skeleton projects, repository pattern, and API response format"
+description: "Universal patterns: repository, service layer, DTO mapping, API response envelope"
 globs: ["**/*"]
 ---
 
 # Common Patterns
 
-## Skeleton Projects
-
-When implementing new functionality:
-
-1. Search for battle-tested skeleton projects
-2. Use parallel agents to evaluate options:
-    - Security assessment
-    - Extensibility analysis
-    - Relevance scoring
-    - Implementation planning
-3. Clone best match as foundation
-4. Iterate within proven structure
-
-## Design Patterns
-
-### Repository Pattern
+## Repository Pattern
 
 Encapsulate data access behind a consistent interface:
-
 - Define standard operations: findAll, findById, create, update, delete
-- Concrete implementations handle storage details (database, API, file, etc.)
+- Concrete implementations handle storage details (database, API, file, cache)
 - Business logic depends on the abstract interface, not the storage mechanism
 - Enables easy swapping of data sources and simplifies testing with mocks
 
-### API Response Format
+## Service Layer
 
-Use a consistent envelope for all API responses:
+- Encapsulate all business logic in service classes
+- Services orchestrate repositories and other services
+- Define transaction boundaries at the service layer
+- Services accept and return domain objects or DTOs, never entities directly
+- Keep services stateless
 
-- Include a success/status indicator
-- Include the data payload (nullable on error)
-- Include an error message field (nullable on success)
-- Include metadata for paginated responses (total, page, limit)
+## DTO Mapping
+
+- Separate domain/entity objects from transport/API objects
+- Use dedicated mapper classes or functions for conversion
+- Never expose internal entity structure through APIs
+- Map at the boundary: controller layer for REST, message handler for messaging
+- Validate DTOs before mapping to domain objects
+
+## API Response Envelope
+
+Use a consistent format for all API responses:
+
+```
+{
+  "success": true/false,
+  "data": { ... } or null,
+  "error": { "code": "...", "message": "..." } or null,
+  "meta": { "total": 100, "page": 1, "limit": 20 } // for paginated responses
+}
+```
+
+- Always include a success/status indicator
+- Data payload is null on error
+- Error field is null on success
+- Include pagination metadata when returning collections
+
+## Skeleton Projects
+
+When starting a new service or module:
+
+1. Search for battle-tested skeleton projects or templates
+2. Evaluate options for security, extensibility, and relevance
+3. Clone the best match as a foundation
+4. Iterate within the proven structure rather than building from scratch

@@ -1,118 +1,73 @@
 ---
 name: api-design
-description: "REST API design patterns including resource naming, status codes, pagination, filtering, error responses, versioning, and rate limiting for production APIs."
+description: "REST API design: resource naming, HTTP methods, status codes, pagination, versioning, error handling"
 targets: ["claudecode"]
 claudecode:
   model: sonnet
-  allowed-tools: [ "Read", "Grep", "Glob" ]
 ---
 
-# API Design Patterns
+# REST API Design Reference
 
-Conventions and best practices for designing consistent, developer-friendly REST APIs.
+## Resource Naming
 
-## When to Activate
+- Use **nouns**, not verbs: `/users`, not `/getUsers`
+- **Plural** form: `/users`, `/orders`, `/products`
+- **Lowercase** with **kebab-case**: `/order-items`, not `/orderItems`
+- **Hierarchical** for sub-resources: `/users/{id}/orders`
+- No trailing slashes: `/users`, not `/users/`
+- No file extensions: `/users/42`, not `/users/42.json`
 
-- Designing new API endpoints
-- Reviewing existing API contracts
-- Adding pagination, filtering, or sorting
-- Implementing error handling for APIs
-- Planning API versioning strategy
-- Building public or partner-facing APIs
-
-## Resource Design
-
-### URL Structure
+### Examples
 
 ```
-# Resources are nouns, plural, lowercase, kebab-case
-GET    /api/v1/users
-GET    /api/v1/users/:id
-POST   /api/v1/users
-PUT    /api/v1/users/:id
-PATCH  /api/v1/users/:id
-DELETE /api/v1/users/:id
-
-# Sub-resources for relationships
-GET    /api/v1/users/:id/orders
-POST   /api/v1/users/:id/orders
-
-# Actions that don't map to CRUD (use verbs sparingly)
-POST   /api/v1/orders/:id/cancel
-POST   /api/v1/auth/login
-POST   /api/v1/auth/refresh
+GET    /api/v1/users              # List users
+GET    /api/v1/users/{id}         # Get user
+POST   /api/v1/users              # Create user
+PUT    /api/v1/users/{id}         # Full update
+PATCH  /api/v1/users/{id}         # Partial update
+DELETE /api/v1/users/{id}         # Delete user
+GET    /api/v1/users/{id}/orders  # List user's orders
 ```
 
-### Naming Rules
+## HTTP Methods
 
-```
-# GOOD
-/api/v1/team-members          # kebab-case for multi-word resources
-/api/v1/orders?status=active  # query params for filtering
-/api/v1/users/123/orders      # nested resources for ownership
+| Method | Semantics        | Safe | Idempotent | Request Body | Response Body  |
+|--------|------------------|------|------------|--------------|----------------|
+| GET    | Read resource(s) | Yes  | Yes        | No           | Yes            |
+| POST   | Create resource  | No   | No         | Yes          | Yes (201)      |
+| PUT    | Full replace     | No   | Yes        | Yes          | Yes (200)      |
+| PATCH  | Partial update   | No   | No         | Yes          | Yes (200)      |
+| DELETE | Remove resource  | No   | Yes        | No           | 204 No Content |
 
-# BAD
-/api/v1/getUsers              # verb in URL
-/api/v1/user                  # singular (use plural)
-/api/v1/team_members          # snake_case in URLs
-/api/v1/users/123/getOrders   # verb in nested resource
-```
+## Status Codes
 
-## HTTP Methods and Status Codes
+### Success (2xx)
 
-### Method Semantics
+| Code           | When                       | Example                                   |
+|----------------|----------------------------|-------------------------------------------|
+| 200 OK         | Successful GET, PUT, PATCH | Return resource                           |
+| 201 Created    | Successful POST            | Return created resource + Location header |
+| 204 No Content | Successful DELETE          | No body                                   |
 
-| Method | Idempotent | Safe | Use For                           |
-|--------|------------|------|-----------------------------------|
-| GET    | Yes        | Yes  | Retrieve resources                |
-| POST   | No         | No   | Create resources, trigger actions |
-| PUT    | Yes        | No   | Full replacement of a resource    |
-| PATCH  | No*        | No   | Partial update of a resource      |
-| DELETE | Yes        | No   | Remove a resource                 |
+### Client Error (4xx)
 
-*PATCH can be made idempotent with proper implementation
+| Code                     | When                             | Example                           |
+|--------------------------|----------------------------------|-----------------------------------|
+| 400 Bad Request          | Malformed request                | Invalid JSON                      |
+| 401 Unauthorized         | Not authenticated                | Missing/invalid token             |
+| 403 Forbidden            | Authenticated but not authorized | Insufficient permissions          |
+| 404 Not Found            | Resource does not exist          | Unknown ID                        |
+| 409 Conflict             | State conflict                   | Duplicate email, version mismatch |
+| 422 Unprocessable Entity | Validation failure               | Invalid field values              |
+| 429 Too Many Requests    | Rate limit exceeded              | Include Retry-After header        |
 
-### Status Code Reference
+### Server Error (5xx)
 
-```
-# Success
-200 OK                    -- GET, PUT, PATCH (with response body)
-201 Created               -- POST (include Location header)
-204 No Content            -- DELETE, PUT (no response body)
-
-# Client Errors
-400 Bad Request           -- Validation failure, malformed JSON
-401 Unauthorized          -- Missing or invalid authentication
-403 Forbidden             -- Authenticated but not authorized
-404 Not Found             -- Resource doesn't exist
-409 Conflict              -- Duplicate entry, state conflict
-422 Unprocessable Entity  -- Semantically invalid (valid JSON, bad data)
-429 Too Many Requests     -- Rate limit exceeded
-
-# Server Errors
-500 Internal Server Error -- Unexpected failure (never expose details)
-502 Bad Gateway           -- Upstream service failed
-503 Service Unavailable   -- Temporary overload, include Retry-After
-```
-
-### Common Mistakes
-
-```
-# BAD: 200 for everything
-{ "status": 200, "success": false, "error": "Not found" }
-
-# GOOD: Use HTTP status codes semantically
-HTTP/1.1 404 Not Found
-{ "error": { "code": "not_found", "message": "User not found" } }
-
-# BAD: 500 for validation errors
-# GOOD: 400 or 422 with field-level details
-
-# BAD: 200 for created resources
-# GOOD: 201 with Location header
-HTTP/1.1 201 Created
-Location: /api/v1/users/abc-123
-```
+| Code                      | When                      |
+|---------------------------|---------------------------|
+| 500 Internal Server Error | Unexpected server error   |
+| 502 Bad Gateway           | Upstream service failure  |
+| 503 Service Unavailable   | Overloaded or maintenance |
 
 ## Response Format
 
@@ -121,406 +76,520 @@ Location: /api/v1/users/abc-123
 ```json
 {
   "data": {
-    "id": "abc-123",
-    "email": "alice@example.com",
-    "name": "Alice",
-    "created_at": "2025-01-15T10:30:00Z"
+    "id": 42,
+    "email": "user@example.com",
+    "name": "John Doe"
   }
 }
 ```
 
-### Collection Response (with Pagination)
+### Paginated Response
 
 ```json
 {
   "data": [
-    { "id": "abc-123", "name": "Alice" },
-    { "id": "def-456", "name": "Bob" }
+    { "id": 1, "name": "Alice" },
+    { "id": 2, "name": "Bob" }
   ],
   "meta": {
-    "total": 142,
-    "page": 1,
-    "per_page": 20,
-    "total_pages": 8
-  },
-  "links": {
-    "self": "/api/v1/users?page=1&per_page=20",
-    "next": "/api/v1/users?page=2&per_page=20",
-    "last": "/api/v1/users?page=8&per_page=20"
+    "page": 0,
+    "size": 20,
+    "totalElements": 142,
+    "totalPages": 8
   }
 }
 ```
 
-### Error Response
+### Error Response (RFC 7807 ProblemDetail)
 
 ```json
 {
-  "error": {
-    "code": "validation_error",
-    "message": "Request validation failed",
-    "details": [
-      {
-        "field": "email",
-        "message": "Must be a valid email address",
-        "code": "invalid_format"
-      },
-      {
-        "field": "age",
-        "message": "Must be between 0 and 150",
-        "code": "out_of_range"
-      }
-    ]
-  }
+  "type": "https://api.example.com/problems/validation-error",
+  "title": "Validation Failed",
+  "status": 422,
+  "detail": "One or more fields have invalid values",
+  "instance": "/api/v1/users",
+  "errors": [
+    { "field": "email", "message": "must be a valid email address" },
+    { "field": "name", "message": "must not be blank" }
+  ]
 }
 ```
 
-### Response Envelope Variants
+## Kotlin Spring Controller
 
-```typescript
-// Option A: Envelope with data wrapper (recommended for public APIs)
-interface ApiResponse<T> {
-  data: T;
-  meta?: PaginationMeta;
-  links?: PaginationLinks;
+```kotlin
+@RestController
+@RequestMapping("/api/v1/users")
+class UserController(private val userService: UserService) {
+
+    @GetMapping
+    fun list(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int,
+        @RequestParam(required = false) status: UserStatus?
+    ): ResponseEntity<PageResponse<UserResponse>> {
+        val result = userService.findAll(status, PageRequest.of(page, size))
+        return ResponseEntity.ok(
+            PageResponse(
+                data = result.content.map { it.toResponse() },
+                meta = PaginationMeta.from(result)
+            )
+        )
+    }
+
+    @GetMapping("/{id}")
+    fun getById(@PathVariable id: Long): ResponseEntity<DataResponse<UserResponse>> {
+        val user = userService.findById(id)
+        return ResponseEntity.ok(DataResponse(data = user.toResponse()))
+    }
+
+    @PostMapping
+    fun create(@Valid @RequestBody request: CreateUserRequest): ResponseEntity<DataResponse<UserResponse>> {
+        val user = userService.create(request)
+        val location = URI.create("/api/v1/users/${user.id}")
+        return ResponseEntity.created(location)
+            .body(DataResponse(data = user.toResponse()))
+    }
+
+    @PutMapping("/{id}")
+    fun update(
+        @PathVariable id: Long,
+        @Valid @RequestBody request: UpdateUserRequest
+    ): ResponseEntity<DataResponse<UserResponse>> {
+        val user = userService.update(id, request)
+        return ResponseEntity.ok(DataResponse(data = user.toResponse()))
+    }
+
+    @PatchMapping("/{id}")
+    fun patch(
+        @PathVariable id: Long,
+        @Valid @RequestBody request: PatchUserRequest
+    ): ResponseEntity<DataResponse<UserResponse>> {
+        val user = userService.patch(id, request)
+        return ResponseEntity.ok(DataResponse(data = user.toResponse()))
+    }
+
+    @DeleteMapping("/{id}")
+    fun delete(@PathVariable id: Long): ResponseEntity<Void> {
+        userService.delete(id)
+        return ResponseEntity.noContent().build()
+    }
 }
+```
 
-interface ApiError {
-  error: {
-    code: string;
-    message: string;
-    details?: FieldError[];
-  };
+## Java Spring Controller
+
+```java
+@RestController
+@RequestMapping("/api/v1/users")
+public class UserController {
+
+    private final UserService userService;
+
+    public UserController(UserService userService) {
+        this.userService = userService;
+    }
+
+    @GetMapping
+    public ResponseEntity<PageResponse<UserResponse>> list(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) UserStatus status) {
+        Page<User> result = userService.findAll(status, PageRequest.of(page, size));
+        List<UserResponse> data = result.getContent().stream()
+            .map(UserResponse::from)
+            .toList();
+        return ResponseEntity.ok(new PageResponse<>(data, PaginationMeta.from(result)));
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<DataResponse<UserResponse>> getById(@PathVariable Long id) {
+        User user = userService.findById(id);
+        return ResponseEntity.ok(new DataResponse<>(UserResponse.from(user)));
+    }
+
+    @PostMapping
+    public ResponseEntity<DataResponse<UserResponse>> create(
+            @Valid @RequestBody CreateUserRequest request) {
+        User user = userService.create(request);
+        URI location = URI.create("/api/v1/users/" + user.getId());
+        return ResponseEntity.created(location)
+            .body(new DataResponse<>(UserResponse.from(user)));
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<DataResponse<UserResponse>> update(
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateUserRequest request) {
+        User user = userService.update(id, request);
+        return ResponseEntity.ok(new DataResponse<>(UserResponse.from(user)));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable Long id) {
+        userService.delete(id);
+        return ResponseEntity.noContent().build();
+    }
 }
+```
 
-// Option B: Flat response (simpler, common for internal APIs)
-// Success: just return the resource directly
-// Error: return error object
-// Distinguish by HTTP status code
+## Response DTOs
+
+```kotlin
+// Kotlin
+data class DataResponse<T>(val data: T)
+
+data class PageResponse<T>(
+    val data: List<T>,
+    val meta: PaginationMeta
+)
+
+data class PaginationMeta(
+    val page: Int,
+    val size: Int,
+    val totalElements: Long,
+    val totalPages: Int
+) {
+    companion object {
+        fun from(page: Page<*>) = PaginationMeta(
+            page = page.number,
+            size = page.size,
+            totalElements = page.totalElements,
+            totalPages = page.totalPages
+        )
+    }
+}
+```
+
+```java
+// Java
+public record DataResponse<T>(T data) {}
+
+public record PageResponse<T>(List<T> data, PaginationMeta meta) {}
+
+public record PaginationMeta(int page, int size, long totalElements, int totalPages) {
+    public static PaginationMeta from(Page<?> page) {
+        return new PaginationMeta(
+            page.getNumber(), page.getSize(),
+            page.getTotalElements(), page.getTotalPages()
+        );
+    }
+}
+```
+
+## Error Handling with @ControllerAdvice
+
+```kotlin
+// Kotlin
+@RestControllerAdvice
+class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
+
+    @ExceptionHandler(ResourceNotFoundException::class)
+    fun handleNotFound(ex: ResourceNotFoundException): ProblemDetail {
+        val problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.message ?: "Resource not found")
+        problem.title = "Not Found"
+        problem.setProperty("timestamp", OffsetDateTime.now())
+        return problem
+    }
+
+    @ExceptionHandler(ConflictException::class)
+    fun handleConflict(ex: ConflictException): ProblemDetail {
+        val problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.message ?: "Conflict")
+        problem.title = "Conflict"
+        return problem
+    }
+
+    override fun handleMethodArgumentNotValid(
+        ex: MethodArgumentNotValidException,
+        headers: HttpHeaders,
+        status: HttpStatusCode,
+        request: WebRequest
+    ): ResponseEntity<Any>? {
+        val problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, "Validation failed")
+        problem.title = "Validation Error"
+        problem.setProperty("errors", ex.bindingResult.fieldErrors.map { fieldError ->
+            mapOf("field" to fieldError.field, "message" to (fieldError.defaultMessage ?: "invalid"))
+        })
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(problem)
+    }
+
+    @ExceptionHandler(Exception::class)
+    fun handleGeneric(ex: Exception): ProblemDetail {
+        // Log the full exception server-side
+        logger.error("Unexpected error", ex)
+        // Return generic message to client (no internal details)
+        return ProblemDetail.forStatusAndDetail(
+            HttpStatus.INTERNAL_SERVER_ERROR,
+            "An unexpected error occurred"
+        )
+    }
+}
+```
+
+```java
+// Java
+@RestControllerAdvice
+public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ProblemDetail handleNotFound(ResourceNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+            HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Not Found");
+        return problem;
+    }
+
+    @ExceptionHandler(ConflictException.class)
+    public ProblemDetail handleConflict(ConflictException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+            HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Conflict");
+        return problem;
+    }
+
+    @Override
+    protected ResponseEntity<Object> handleMethodArgumentNotValid(
+            MethodArgumentNotValidException ex,
+            HttpHeaders headers,
+            HttpStatusCode status,
+            WebRequest request) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+            HttpStatus.UNPROCESSABLE_ENTITY, "Validation failed");
+        problem.setTitle("Validation Error");
+        problem.setProperty("errors", ex.getBindingResult().getFieldErrors().stream()
+            .map(e -> Map.of("field", e.getField(), "message", e.getDefaultMessage()))
+            .toList());
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(problem);
+    }
+}
 ```
 
 ## Pagination
 
-### Offset-Based (Simple)
+### Offset-Based (Simple Cases)
 
-```
-GET /api/v1/users?page=2&per_page=20
-
-# Implementation
-SELECT * FROM users
-ORDER BY created_at DESC
-LIMIT 20 OFFSET 20;
-```
-
-**Pros:** Easy to implement, supports "jump to page N"
-**Cons:** Slow on large offsets (OFFSET 100000), inconsistent with concurrent inserts
-
-### Cursor-Based (Scalable)
-
-```
-GET /api/v1/users?cursor=eyJpZCI6MTIzfQ&limit=20
-
-# Implementation
-SELECT * FROM users
-WHERE id > :cursor_id
-ORDER BY id ASC
-LIMIT 21;  -- fetch one extra to determine has_next
-```
-
-```json
-{
-  "data": [...],
-  "meta": {
-    "has_next": true,
-    "next_cursor": "eyJpZCI6MTQzfQ"
-  }
+```kotlin
+// Kotlin
+@GetMapping("/orders")
+fun list(
+    @RequestParam(defaultValue = "0") page: Int,
+    @RequestParam(defaultValue = "20") size: Int,
+    @RequestParam(defaultValue = "createdAt,desc") sort: String
+): ResponseEntity<PageResponse<OrderResponse>> {
+    val pageable = PageRequest.of(page, size, Sort.by(parseSortParams(sort)))
+    val result = orderService.findAll(pageable)
+    return ResponseEntity.ok(PageResponse(
+        data = result.content.map { it.toResponse() },
+        meta = PaginationMeta.from(result)
+    ))
 }
 ```
 
-**Pros:** Consistent performance regardless of position, stable with concurrent inserts
-**Cons:** Cannot jump to arbitrary page, cursor is opaque
+### Cursor-Based (Large Datasets)
 
-### When to Use Which
+```kotlin
+// Kotlin
+data class CursorPage<T>(
+    val data: List<T>,
+    val nextCursor: String?,
+    val hasMore: Boolean
+)
 
-| Use Case                                | Pagination Type                         |
-|-----------------------------------------|-----------------------------------------|
-| Admin dashboards, small datasets (<10K) | Offset                                  |
-| Infinite scroll, feeds, large datasets  | Cursor                                  |
-| Public APIs                             | Cursor (default) with offset (optional) |
-| Search results                          | Offset (users expect page numbers)      |
+@GetMapping("/events")
+fun listEvents(
+    @RequestParam(required = false) cursor: String?,
+    @RequestParam(defaultValue = "50") limit: Int
+): ResponseEntity<CursorPage<EventResponse>> {
+    val decodedCursor = cursor?.let { decodeCursor(it) }
+    val events = eventService.findAfter(decodedCursor, limit + 1)
 
-## Filtering, Sorting, and Search
+    val hasMore = events.size > limit
+    val page = events.take(limit)
+    val nextCursor = if (hasMore) encodeCursor(page.last()) else null
 
-### Filtering
+    return ResponseEntity.ok(CursorPage(
+        data = page.map { it.toResponse() },
+        nextCursor = nextCursor,
+        hasMore = hasMore
+    ))
+}
 
-```
-# Simple equality
-GET /api/v1/orders?status=active&customer_id=abc-123
+private fun encodeCursor(event: Event): String =
+    Base64.getUrlEncoder().encodeToString("${event.createdAt}|${event.id}".toByteArray())
 
-# Comparison operators (use bracket notation)
-GET /api/v1/products?price[gte]=10&price[lte]=100
-GET /api/v1/orders?created_at[after]=2025-01-01
-
-# Multiple values (comma-separated)
-GET /api/v1/products?category=electronics,clothing
-
-# Nested fields (dot notation)
-GET /api/v1/orders?customer.country=US
-```
-
-### Sorting
-
-```
-# Single field (prefix - for descending)
-GET /api/v1/products?sort=-created_at
-
-# Multiple fields (comma-separated)
-GET /api/v1/products?sort=-featured,price,-created_at
-```
-
-### Full-Text Search
-
-```
-# Search query parameter
-GET /api/v1/products?q=wireless+headphones
-
-# Field-specific search
-GET /api/v1/users?email=alice
-```
-
-### Sparse Fieldsets
-
-```
-# Return only specified fields (reduces payload)
-GET /api/v1/users?fields=id,name,email
-GET /api/v1/orders?fields=id,total,status&include=customer.name
-```
-
-## Authentication and Authorization
-
-### Token-Based Auth
-
-```
-# Bearer token in Authorization header
-GET /api/v1/users
-Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
-
-# API key (for server-to-server)
-GET /api/v1/data
-X-API-Key: sk_live_abc123
-```
-
-### Authorization Patterns
-
-```typescript
-// Resource-level: check ownership
-app.get("/api/v1/orders/:id", async (req, res) => {
-  const order = await Order.findById(req.params.id);
-  if (!order) return res.status(404).json({ error: { code: "not_found" } });
-  if (order.userId !== req.user.id) return res.status(403).json({ error: { code: "forbidden" } });
-  return res.json({ data: order });
-});
-
-// Role-based: check permissions
-app.delete("/api/v1/users/:id", requireRole("admin"), async (req, res) => {
-  await User.delete(req.params.id);
-  return res.status(204).send();
-});
-```
-
-## Rate Limiting
-
-### Headers
-
-```
-HTTP/1.1 200 OK
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 95
-X-RateLimit-Reset: 1640000000
-
-# When exceeded
-HTTP/1.1 429 Too Many Requests
-Retry-After: 60
-{
-  "error": {
-    "code": "rate_limit_exceeded",
-    "message": "Rate limit exceeded. Try again in 60 seconds."
-  }
+private fun decodeCursor(cursor: String): CursorData {
+    val decoded = String(Base64.getUrlDecoder().decode(cursor))
+    val (timestamp, id) = decoded.split("|")
+    return CursorData(OffsetDateTime.parse(timestamp), id.toLong())
 }
 ```
 
-### Rate Limit Tiers
+```java
+// Java
+public record CursorPage<T>(List<T> data, String nextCursor, boolean hasMore) {}
 
-| Tier          | Limit     | Window      | Use Case            |
-|---------------|-----------|-------------|---------------------|
-| Anonymous     | 30/min    | Per IP      | Public endpoints    |
-| Authenticated | 100/min   | Per user    | Standard API access |
-| Premium       | 1000/min  | Per API key | Paid API plans      |
-| Internal      | 10000/min | Per service | Service-to-service  |
+@GetMapping("/events")
+public ResponseEntity<CursorPage<EventResponse>> listEvents(
+        @RequestParam(required = false) String cursor,
+        @RequestParam(defaultValue = "50") int limit) {
+    CursorData decodedCursor = cursor != null ? decodeCursor(cursor) : null;
+    List<Event> events = eventService.findAfter(decodedCursor, limit + 1);
+
+    boolean hasMore = events.size() > limit;
+    List<Event> page = events.subList(0, Math.min(events.size(), limit));
+    String nextCursor = hasMore ? encodeCursor(page.get(page.size() - 1)) : null;
+
+    return ResponseEntity.ok(new CursorPage<>(
+        page.stream().map(EventResponse::from).toList(),
+        nextCursor,
+        hasMore
+    ));
+}
+```
+
+## Filtering and Sorting
+
+```
+GET /api/v1/orders?status=PENDING&minTotal=100&sort=-createdAt,+total
+```
+
+```kotlin
+// Kotlin
+@GetMapping("/orders")
+fun list(
+    @RequestParam(required = false) status: OrderStatus?,
+    @RequestParam(required = false) minTotal: BigDecimal?,
+    @RequestParam(required = false) maxTotal: BigDecimal?,
+    @RequestParam(defaultValue = "-createdAt") sort: String,
+    @RequestParam(defaultValue = "0") page: Int,
+    @RequestParam(defaultValue = "20") size: Int
+): ResponseEntity<PageResponse<OrderResponse>> {
+    val filter = OrderFilter(status = status, minTotal = minTotal, maxTotal = maxTotal)
+    val pageable = PageRequest.of(page, size, parseSort(sort))
+    val result = orderService.findAll(filter, pageable)
+    return ResponseEntity.ok(PageResponse(
+        data = result.content.map { it.toResponse() },
+        meta = PaginationMeta.from(result)
+    ))
+}
+
+private fun parseSort(sort: String): Sort {
+    val orders = sort.split(",").map { param ->
+        val trimmed = param.trim()
+        if (trimmed.startsWith("-")) {
+            Sort.Order.desc(trimmed.substring(1))
+        } else {
+            Sort.Order.asc(trimmed.removePrefix("+"))
+        }
+    }
+    return Sort.by(orders)
+}
+```
 
 ## Versioning
 
-### URL Path Versioning (Recommended)
+### URL Path Versioning (Preferred)
 
 ```
 /api/v1/users
 /api/v2/users
 ```
 
-**Pros:** Explicit, easy to route, cacheable
-**Cons:** URL changes between versions
+```kotlin
+@RestController
+@RequestMapping("/api/v1/users")
+class UserV1Controller { ... }
 
-### Header Versioning
+@RestController
+@RequestMapping("/api/v2/users")
+class UserV2Controller { ... }
+```
+
+### Header Versioning (Alternative)
 
 ```
 GET /api/users
 Accept: application/vnd.myapp.v2+json
 ```
 
-**Pros:** Clean URLs
-**Cons:** Harder to test, easy to forget
+## Rate Limiting Headers
 
-### Versioning Strategy
+Include in responses:
 
 ```
-1. Start with /api/v1/ -- don't version until you need to
-2. Maintain at most 2 active versions (current + previous)
-3. Deprecation timeline:
-   - Announce deprecation (6 months notice for public APIs)
-   - Add Sunset header: Sunset: Sat, 01 Jan 2026 00:00:00 GMT
-   - Return 410 Gone after sunset date
-4. Non-breaking changes don't need a new version:
-   - Adding new fields to responses
-   - Adding new optional query parameters
-   - Adding new endpoints
-5. Breaking changes require a new version:
-   - Removing or renaming fields
-   - Changing field types
-   - Changing URL structure
-   - Changing authentication method
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 87
+X-RateLimit-Reset: 1700000000
+Retry-After: 30
 ```
 
-## Implementation Patterns
-
-### TypeScript (Next.js API Route)
-
-```typescript
-import { z } from "zod";
-import { NextRequest, NextResponse } from "next/server";
-
-const createUserSchema = z.object({
-  email: z.string().email(),
-  name: z.string().min(1).max(100),
-});
-
-export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const parsed = createUserSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return NextResponse.json({
-      error: {
-        code: "validation_error",
-        message: "Request validation failed",
-        details: parsed.error.issues.map(i => ({
-          field: i.path.join("."),
-          message: i.message,
-          code: i.code,
-        })),
-      },
-    }, { status: 422 });
-  }
-
-  const user = await createUser(parsed.data);
-
-  return NextResponse.json(
-    { data: user },
-    {
-      status: 201,
-      headers: { Location: `/api/v1/users/${user.id}` },
-    },
-  );
+```kotlin
+// Kotlin - simple rate limit response headers
+@Component
+class RateLimitFilter : OncePerRequestFilter() {
+    override fun doFilterInternal(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+        filterChain: FilterChain
+    ) {
+        // After rate limit check
+        response.setHeader("X-RateLimit-Limit", "100")
+        response.setHeader("X-RateLimit-Remaining", remaining.toString())
+        response.setHeader("X-RateLimit-Reset", resetTimestamp.toString())
+        filterChain.doFilter(request, response)
+    }
 }
 ```
 
-### Python (Django REST Framework)
+## Validation
 
-```python
-from rest_framework import serializers, viewsets, status
-from rest_framework.response import Response
+```kotlin
+// Kotlin
+data class CreateUserRequest(
+    @field:NotBlank(message = "Email is required")
+    @field:Email(message = "Must be a valid email")
+    val email: String,
 
-class CreateUserSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    name = serializers.CharField(max_length=100)
+    @field:NotBlank(message = "Name is required")
+    @field:Size(min = 2, max = 100, message = "Name must be 2-100 characters")
+    val name: String,
 
-class UserSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = ["id", "email", "name", "created_at"]
-
-class UserViewSet(viewsets.ModelViewSet):
-    serializer_class = UserSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_serializer_class(self):
-        if self.action == "create":
-            return CreateUserSerializer
-        return UserSerializer
-
-    def create(self, request):
-        serializer = CreateUserSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = UserService.create(**serializer.validated_data)
-        return Response(
-            {"data": UserSerializer(user).data},
-            status=status.HTTP_201_CREATED,
-            headers={"Location": f"/api/v1/users/{user.id}"},
-        )
+    @field:Size(max = 500, message = "Bio must not exceed 500 characters")
+    val bio: String? = null
+)
 ```
 
-### Go (net/http)
+```java
+// Java
+public record CreateUserRequest(
+    @NotBlank(message = "Email is required")
+    @Email(message = "Must be a valid email")
+    String email,
 
-```go
-func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
-    var req CreateUserRequest
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        writeError(w, http.StatusBadRequest, "invalid_json", "Invalid request body")
-        return
-    }
+    @NotBlank(message = "Name is required")
+    @Size(min = 2, max = 100, message = "Name must be 2-100 characters")
+    String name,
 
-    if err := req.Validate(); err != nil {
-        writeError(w, http.StatusUnprocessableEntity, "validation_error", err.Error())
-        return
-    }
-
-    user, err := h.service.Create(r.Context(), req)
-    if err != nil {
-        switch {
-        case errors.Is(err, domain.ErrEmailTaken):
-            writeError(w, http.StatusConflict, "email_taken", "Email already registered")
-        default:
-            writeError(w, http.StatusInternalServerError, "internal_error", "Internal error")
-        }
-        return
-    }
-
-    w.Header().Set("Location", fmt.Sprintf("/api/v1/users/%s", user.ID))
-    writeJSON(w, http.StatusCreated, map[string]any{"data": user})
-}
+    @Size(max = 500, message = "Bio must not exceed 500 characters")
+    String bio
+) {}
 ```
 
 ## API Design Checklist
 
-Before shipping a new endpoint:
-
-- [ ] Resource URL follows naming conventions (plural, kebab-case, no verbs)
-- [ ] Correct HTTP method used (GET for reads, POST for creates, etc.)
-- [ ] Appropriate status codes returned (not 200 for everything)
-- [ ] Input validated with schema (Zod, Pydantic, Bean Validation)
-- [ ] Error responses follow standard format with codes and messages
-- [ ] Pagination implemented for list endpoints (cursor or offset)
-- [ ] Authentication required (or explicitly marked as public)
-- [ ] Authorization checked (user can only access their own resources)
-- [ ] Rate limiting configured
-- [ ] Response does not leak internal details (stack traces, SQL errors)
-- [ ] Consistent naming with existing endpoints (camelCase vs snake_case)
-- [ ] Documented (OpenAPI/Swagger spec updated)
+- [ ] Resources are nouns, plural, kebab-case
+- [ ] Correct HTTP methods for each operation
+- [ ] Appropriate status codes (not just 200 for everything)
+- [ ] Consistent response envelope (data + meta)
+- [ ] ProblemDetail (RFC 7807) for errors
+- [ ] Pagination on all list endpoints
+- [ ] Validation on all inputs with clear error messages
+- [ ] Versioning strategy decided and applied
+- [ ] No sensitive data in error responses
+- [ ] Rate limiting headers on all endpoints
+- [ ] Location header on 201 Created responses
+- [ ] Idempotent PUT and DELETE
+- [ ] HATEOAS links if applicable
+- [ ] Request/response DTOs separate from domain entities
+- [ ] Consistent naming across all endpoints

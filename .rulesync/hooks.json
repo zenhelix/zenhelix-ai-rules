@@ -1,4 +1,16 @@
 {
   "version": 1,
-  "hooks": {}
+  "hooks": {
+    "postToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "command": ".rulesync/hooks/format-check.sh"
+      }
+    ],
+    "stop": [
+      {
+        "command": ".rulesync/hooks/session-summary.sh"
+      }
+    ]
+  }
 }

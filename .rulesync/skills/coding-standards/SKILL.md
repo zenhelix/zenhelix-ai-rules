@@ -1,530 +1,358 @@
 ---
 name: coding-standards
-description: "Universal coding standards, best practices, and patterns for Kotlin and Java development."
+description: "Coding standards: readability, KISS/DRY/YAGNI, error handling, type safety for Kotlin and Java"
 targets: ["claudecode"]
 claudecode:
   model: sonnet
-  allowed-tools: ["Read", "Grep", "Glob"]
 ---
 
-# Coding Standards & Best Practices
+# Coding Standards
 
-Universal coding standards applicable across all projects.
+## Readability
 
-## When to Activate
-
-- Starting a new project or module
-- Reviewing code for quality and maintainability
-- Refactoring existing code to follow conventions
-- Enforcing naming, formatting, or structural consistency
-- Setting up linting, formatting, or static analysis rules
-- Onboarding new contributors to coding conventions
-
-## Code Quality Principles
-
-### 1. Readability First
-
-- Code is read more than written
-- Clear variable and function names
-- Self-documenting code preferred over comments
-- Consistent formatting
-
-### 2. KISS (Keep It Simple, Stupid)
-
-- Simplest solution that works
-- Avoid over-engineering
-- No premature optimization
-- Easy to understand > clever code
-
-### 3. DRY (Don't Repeat Yourself)
-
-- Extract common logic into functions
-- Create reusable components
-- Share utilities across modules
-- Avoid copy-paste programming
-
-### 4. YAGNI (You Aren't Gonna Need It)
-
-- Don't build features before they're needed
-- Avoid speculative generality
-- Add complexity only when required
-- Start simple, refactor when needed
-
-## Kotlin Standards
-
-### Variable Naming
+### Meaningful Names
 
 ```kotlin
-// GOOD: Descriptive names
-val marketSearchQuery = "election"
-val isUserAuthenticated = true
-val totalRevenue = 1000L
+// BAD
+val d = 86400
+fun proc(u: User): Boolean
 
-// BAD: Unclear names
-val q = "election"
-val flag = true
-val x = 1000L
+// GOOD
+val secondsPerDay = 86400
+fun isEligibleForPromotion(user: User): Boolean
 ```
 
-### Function Naming
+```java
+// BAD
+List<int[]> getThem() { ... }
 
-```kotlin
-// GOOD: Verb-noun pattern
-suspend fun fetchMarketData(marketId: String): MarketData { }
-fun calculateSimilarity(a: DoubleArray, b: DoubleArray): Double { }
-fun isValidEmail(email: String): Boolean { }
-
-// BAD: Unclear or noun-only
-suspend fun market(id: String): Any { }
-fun similarity(a: DoubleArray, b: DoubleArray): Any { }
-fun email(e: String): Any { }
+// GOOD
+List<Cell> getFlaggedCells() { ... }
 ```
 
-### Immutability Pattern (CRITICAL)
+### Small Functions
+
+Each function should do ONE thing:
+
+- 5-20 lines is ideal
+- 50 lines maximum
+- If you need comments to explain sections, extract functions instead
+- Name functions after their intent, not their implementation
+
+### Single Responsibility
+
+Each class has ONE reason to change:
 
 ```kotlin
-// ALWAYS use data class copy
-val updatedUser = user.copy(name = "New Name")
-
-val updatedList = items + newItem
-
-// NEVER mutate directly
-user.name = "New Name"          // BAD (use val + copy)
-(items as MutableList).add(newItem)  // BAD
-```
-
-### Error Handling
-
-```kotlin
-// GOOD: Comprehensive error handling
-suspend fun fetchData(url: String): ResponseData {
-    return try {
-        val response = httpClient.get(url)
-
-        if (!response.status.isSuccess()) {
-            throw HttpException("HTTP ${response.status.value}: ${response.status.description}")
-        }
-
-        response.body()
-    } catch (e: HttpException) {
-        logger.error("Fetch failed: ${e.message}", e)
-        throw ServiceException("Failed to fetch data", e)
+// BAD: handles validation, persistence, and notification
+class UserService {
+    fun register(request: RegisterRequest) {
+        validate(request)
+        val user = save(request)
+        sendEmail(user)
     }
 }
 
-// BAD: No error handling
-suspend fun fetchData(url: String): ResponseData {
-    val response = httpClient.get(url)
-    return response.body()
-}
-```
-
-### Coroutines Best Practices
-
-```kotlin
-// GOOD: Parallel execution when possible
-val (users, markets, stats) = coroutineScope {
-    Triple(
-        async { fetchUsers() },
-        async { fetchMarkets() },
-        async { fetchStats() }
-    )
-}.let { (u, m, s) -> Triple(u.await(), m.await(), s.await()) }
-
-// BAD: Sequential when unnecessary
-val users = fetchUsers()
-val markets = fetchMarkets()
-val stats = fetchStats()
-```
-
-### Type Safety
-
-```kotlin
-// GOOD: Proper types with sealed classes/enums
-data class Market(
-    val id: String,
-    val name: String,
-    val status: MarketStatus,
-    val createdAt: Instant
-)
-
-enum class MarketStatus {
-    ACTIVE, RESOLVED, CLOSED
-}
-
-fun getMarket(id: String): Market {
-    // Implementation
-}
-
-// BAD: Using Any or unchecked types
-fun getMarket(id: Any): Any {
-    // Implementation
-}
-```
-
-## Java Standards
-
-### Variable Naming
-
-```java
-// GOOD: Descriptive names
-final String marketSearchQuery = "election";
-final boolean isUserAuthenticated = true;
-final long totalRevenue = 1000L;
-
-// BAD: Unclear names
-final String q = "election";
-final boolean flag = true;
-final long x = 1000L;
-```
-
-### Immutability Pattern (CRITICAL)
-
-```java
-// GOOD: Use records (Java 16+) or immutable classes
-public record User(String id, String name, String email) {}
-
-// Creating updated copies with builders or wither methods
-var updatedUser = new User(user.id(), "New Name", user.email());
-
-// Use List.of / List.copyOf for immutable collections
-var updatedList = Stream.concat(items.stream(), Stream.of(newItem))
-    .toList();
-
-// BAD: Mutable state
-user.setName("New Name");  // BAD
-items.add(newItem);        // BAD
-```
-
-### Error Handling
-
-```java
-// GOOD: Comprehensive error handling
-public ResponseData fetchData(String url) {
-    try {
-        var response = httpClient.send(request, BodyHandlers.ofString());
-
-        if (response.statusCode() >= 400) {
-            throw new HttpException("HTTP %d: %s".formatted(response.statusCode(), response.body()));
-        }
-
-        return objectMapper.readValue(response.body(), ResponseData.class);
-    } catch (HttpException e) {
-        logger.error("Fetch failed: {}", e.getMessage(), e);
-        throw new ServiceException("Failed to fetch data", e);
+// GOOD: each concern separated
+class UserRegistrationService(
+    private val validator: UserValidator,
+    private val repository: UserRepository,
+    private val notifier: UserNotifier,
+) {
+    fun register(request: RegisterRequest): User {
+        validator.validate(request)
+        val user = repository.save(request.toUser())
+        notifier.onRegistered(user)
+        return user
     }
 }
 ```
 
-### CompletableFuture Best Practices
+## KISS: Keep It Simple
+
+Choose the simplest solution that correctly solves the problem:
+
+```kotlin
+// OVER-ENGINEERED
+interface UserFinder<T : Identifiable> : GenericFinder<T, Long> {
+    override fun findBySpec(spec: Specification<T>): List<T>
+}
+
+// KISS
+interface UserRepository {
+    fun findById(id: Long): User?
+    fun findByEmail(email: String): User?
+}
+```
+
+Avoid:
+
+- Premature abstraction
+- Generic type parameters unless truly needed
+- Design patterns for the sake of patterns
+- Framework features you do not need
+
+## DRY: Don't Repeat Yourself
+
+Extract when a pattern repeats THREE or more times, not before:
+
+```kotlin
+// First occurrence: inline is fine
+// Second occurrence: note it, leave inline
+// Third occurrence: extract
+
+// Extracted utility
+fun <T> T?.orThrow(message: () -> String): T =
+    this ?: throw NotFoundException(message())
+
+// Usage
+val user = userRepository.findByIdOrNull(id).orThrow { "User $id not found" }
+val order = orderRepository.findByIdOrNull(id).orThrow { "Order $id not found" }
+val product = productRepository.findByIdOrNull(id).orThrow { "Product $id not found" }
+```
+
+## YAGNI: You Aren't Gonna Need It
+
+Do not build for hypothetical future requirements:
+
+```kotlin
+// BAD: supports multiple notification channels "just in case"
+interface NotificationChannel {
+    fun send(message: Message)
+}
+class EmailChannel : NotificationChannel { ... }
+class SmsChannel : NotificationChannel { ... }  // nobody asked for SMS
+class PushChannel : NotificationChannel { ... } // nobody asked for push
+
+// GOOD: build what is needed now
+class EmailNotifier(private val mailSender: JavaMailSender) {
+    fun sendWelcomeEmail(user: User) { ... }
+}
+// Add abstraction WHEN a second channel is actually needed
+```
+
+## Immutability
+
+### Kotlin
+
+```kotlin
+// Use val, not var
+val name: String = "Alice"
+
+// Use immutable collections
+val users: List<User> = repository.findAll()
+
+// Use copy() for modifications
+val updated = user.copy(name = "Bob")
+
+// Data classes are naturally immutable with val properties
+data class User(
+    val id: Long,
+    val name: String,
+    val email: String,
+)
+```
+
+### Java
 
 ```java
-// GOOD: Parallel execution when possible
-var usersFuture = CompletableFuture.supplyAsync(() -> fetchUsers());
-var marketsFuture = CompletableFuture.supplyAsync(() -> fetchMarkets());
-var statsFuture = CompletableFuture.supplyAsync(() -> fetchStats());
+// Use records for immutable data
+public record User(Long id, String name, String email) {}
 
-CompletableFuture.allOf(usersFuture, marketsFuture, statsFuture).join();
+// Use final fields
+public final class Config {
+    private final String host;
+    private final int port;
+}
 
-var users = usersFuture.join();
-var markets = marketsFuture.join();
-var stats = statsFuture.join();
-
-// BAD: Sequential when unnecessary
-var users = fetchUsers();
-var markets = fetchMarkets();
-var stats = fetchStats();
+// Use unmodifiable collections
+var users = List.of(user1, user2);
+var map = Map.of("key", "value");
+var copy = List.copyOf(mutableList);
 ```
 
-## API Design Standards
+## Error Handling
 
-### REST API Conventions
-
-```
-GET    /api/markets              # List all markets
-GET    /api/markets/:id          # Get specific market
-POST   /api/markets              # Create new market
-PUT    /api/markets/:id          # Update market (full)
-PATCH  /api/markets/:id          # Update market (partial)
-DELETE /api/markets/:id          # Delete market
-
-# Query parameters for filtering
-GET /api/markets?status=active&limit=10&offset=0
-```
-
-### Response Format
+### Custom Domain Exceptions
 
 ```kotlin
-// GOOD: Consistent response structure
-data class ApiResponse<T>(
-    val success: Boolean,
-    val data: T? = null,
-    val error: String? = null,
-    val meta: PageMeta? = null
-)
+sealed class DomainException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
-data class PageMeta(
-    val total: Long,
-    val page: Int,
-    val limit: Int
-)
-
-// Success response
-ResponseEntity.ok(
-    ApiResponse(success = true, data = markets, meta = PageMeta(total = 100, page = 1, limit = 10))
-)
-
-// Error response
-ResponseEntity.badRequest().body(
-    ApiResponse<Nothing>(success = false, error = "Invalid request")
-)
+class NotFoundException(message: String) : DomainException(message)
+class ValidationException(val errors: List<String>) : DomainException(errors.joinToString("; "))
+class ConflictException(message: String) : DomainException(message)
+class AccessDeniedException(message: String) : DomainException(message)
 ```
 
-### Input Validation
+### Structured Error Responses
 
 ```kotlin
-// GOOD: Schema validation with Jakarta Validation
-data class CreateMarketRequest(
-    @field:NotBlank
-    @field:Size(min = 1, max = 200)
+@RestControllerAdvice
+class GlobalExceptionHandler {
+
+    @ExceptionHandler(NotFoundException::class)
+    fun handleNotFound(ex: NotFoundException): ProblemDetail =
+        ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.message ?: "Not found")
+
+    @ExceptionHandler(ValidationException::class)
+    fun handleValidation(ex: ValidationException): ProblemDetail =
+        ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.message ?: "Validation error")
+}
+```
+
+### Never Swallow Exceptions
+
+```kotlin
+// BAD
+try { riskyOperation() } catch (_: Exception) { }
+
+// GOOD
+try {
+    riskyOperation()
+} catch (e: SpecificException) {
+    logger.error(e) { "Failed to perform risky operation for user=$userId" }
+    throw ServiceException("Operation failed", e)
+}
+```
+
+## Type Safety
+
+### Sealed Classes for Finite States
+
+```kotlin
+sealed interface PaymentResult {
+    data class Success(val transactionId: String, val amount: BigDecimal) : PaymentResult
+    data class Declined(val reason: String) : PaymentResult
+    data class Error(val exception: Throwable) : PaymentResult
+}
+
+// Compiler enforces exhaustive when
+fun handle(result: PaymentResult): String = when (result) {
+    is PaymentResult.Success -> "Paid: ${result.transactionId}"
+    is PaymentResult.Declined -> "Declined: ${result.reason}"
+    is PaymentResult.Error -> "Error: ${result.exception.message}"
+}
+```
+
+### Avoid Stringly-Typed Code
+
+```kotlin
+// BAD
+fun findUsers(role: String): List<User>  // what values are valid?
+
+// GOOD
+enum class Role { ADMIN, USER, MODERATOR }
+fun findUsers(role: Role): List<User>
+```
+
+### Value Classes for Domain Primitives (Kotlin)
+
+```kotlin
+@JvmInline
+value class UserId(val value: Long)
+
+@JvmInline
+value class Email(val value: String) {
+    init { require(value.contains("@")) { "Invalid email: $value" } }
+}
+```
+
+## Coroutine Best Practices (Kotlin)
+
+```kotlin
+// Use structured concurrency
+class UserService(
+    private val repository: UserRepository,
+    private val notifier: UserNotifier,
+) {
+    // Let the caller manage the scope
+    suspend fun register(request: RegisterRequest): User {
+        val user = repository.save(request.toUser())
+        notifier.onRegistered(user)
+        return user
+    }
+}
+
+// Parallel execution with coroutineScope
+suspend fun fetchDashboard(userId: Long): Dashboard = coroutineScope {
+    val userDeferred = async { userService.findById(userId) }
+    val ordersDeferred = async { orderService.findByUserId(userId) }
+    Dashboard(user = userDeferred.await(), orders = ordersDeferred.await())
+}
+```
+
+## CompletableFuture Best Practices (Java)
+
+```java
+public CompletableFuture<Dashboard> fetchDashboard(Long userId) {
+    var userFuture = userService.findById(userId);
+    var ordersFuture = orderService.findByUserId(userId);
+
+    return userFuture.thenCombine(ordersFuture, Dashboard::new)
+        .orTimeout(5, TimeUnit.SECONDS)
+        .exceptionally(ex -> {
+            logger.error("Dashboard fetch failed for user={}", userId, ex);
+            throw new ServiceException("Failed to load dashboard", ex);
+        });
+}
+```
+
+## REST API Conventions
+
+- URLs: kebab-case, plural nouns — `/api/v1/user-accounts`
+- HTTP methods: GET (read), POST (create), PUT (full update), PATCH (partial), DELETE
+- Status codes: 200 (OK), 201 (Created), 204 (No Content), 400, 401, 403, 404, 409, 500
+- Request/response bodies: camelCase JSON
+- Pagination: `?page=0&size=20&sort=name,asc`
+- Versioning: URL path (`/api/v1/`) or header
+
+## Input Validation
+
+```kotlin
+data class CreateUserRequest(
+    @field:NotBlank(message = "Name is required")
+    @field:Size(min = 2, max = 100)
     val name: String,
 
     @field:NotBlank
-    @field:Size(min = 1, max = 2000)
-    val description: String,
+    @field:Email(message = "Invalid email format")
+    val email: String,
 
-    @field:Future
-    val endDate: Instant,
-
-    @field:NotEmpty
-    val categories: List<String>
+    @field:NotBlank
+    @field:Size(min = 8, max = 128)
+    val password: String,
 )
+```
 
-@PostMapping("/api/markets")
-fun createMarket(@Valid @RequestBody request: CreateMarketRequest): ResponseEntity<ApiResponse<Market>> {
-    // Validation is handled automatically by Spring
-    val market = marketService.create(request)
-    return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse(success = true, data = market))
+Kotlin preconditions:
+```kotlin
+fun withdraw(amount: BigDecimal) {
+    require(amount > BigDecimal.ZERO) { "Amount must be positive: $amount" }
+    check(status == AccountStatus.ACTIVE) { "Account is not active" }
 }
 ```
 
 ## File Organization
 
-### Project Structure
+- Organize by feature/domain, not by type:
+  ```
+  user/
+  ├── UserController.kt
+  ├── UserService.kt
+  ├── UserRepository.kt
+  └── User.kt
+  ```
+- 200-400 lines per file is typical
+- 800 lines maximum — split if larger
+- One public class/interface per file (Kotlin allows related private classes)
 
-```
-src/
-├── main/
-│   ├── kotlin/com/example/app/
-│   │   ├── config/              # Spring configuration
-│   │   ├── market/              # Market feature
-│   │   │   ├── MarketController.kt
-│   │   │   ├── MarketService.kt
-│   │   │   ├── MarketRepository.kt
-│   │   │   ├── Market.kt        # Entity/domain model
-│   │   │   └── MarketDto.kt     # Request/response DTOs
-│   │   ├── auth/                # Auth feature
-│   │   └── common/              # Shared utilities
-│   │       ├── exception/       # Custom exceptions
-│   │       ├── util/            # Helper functions
-│   │       └── dto/             # Shared DTOs
-│   └── resources/
-│       ├── application.yml
-│       └── db/migration/        # Flyway migrations
-└── test/
-    └── kotlin/com/example/app/
-        ├── market/
-        │   ├── MarketControllerTest.kt
-        │   ├── MarketServiceTest.kt
-        │   └── MarketRepositoryTest.kt
-        └── integration/
-```
+## Code Smells Checklist
 
-### File Naming
-
-```
-MarketController.kt          # PascalCase for classes
-MarketService.kt             # PascalCase for classes
-MarketRepository.kt          # PascalCase for interfaces/classes
-MarketDto.kt                 # PascalCase with Dto suffix
-DateUtils.kt                 # PascalCase for utility classes
-market-schema.graphql         # kebab-case for non-Kotlin resources
-```
-
-## Comments & Documentation
-
-### When to Comment
-
-```kotlin
-// GOOD: Explain WHY, not WHAT
-// Use exponential backoff to avoid overwhelming the API during outages
-val delay = minOf(1000L * 2.0.pow(retryCount).toLong(), 30_000L)
-
-// Deliberately using mutable list here for performance with large datasets
-val items = mutableListOf<Item>()
-
-// BAD: Stating the obvious
-// Increment counter by 1
-count++
-
-// Set name to user's name
-name = user.name
-```
-
-### KDoc for Public APIs
-
-```kotlin
-/**
- * Searches markets using semantic similarity.
- *
- * @param query Natural language search query
- * @param limit Maximum number of results (default: 10)
- * @return List of markets sorted by similarity score
- * @throws ServiceException If embedding API fails or database is unavailable
- *
- * @sample
- * ```
-
-* val results = searchMarkets("election", 5)
-* println(results[0].name) // "Trump vs Biden"
-* ```
-
-*/
-suspend fun searchMarkets(
-query: String,
-limit: Int = 10
-): List<Market> {
-// Implementation
-}
-```
-
-## Performance Best Practices
-
-### Caching with Spring Cache
-
-```kotlin
-@Cacheable("markets", key = "#id")
-fun findMarketById(id: String): Market? {
-    return marketRepository.findById(id).orElse(null)
-}
-
-@CacheEvict("markets", key = "#id")
-fun updateMarket(id: String, data: UpdateMarketRequest): Market {
-    // Update logic
-}
-```
-
-### Lazy Initialization
-
-```kotlin
-// GOOD: Lazy initialization for expensive resources
-val heavyResource: ExpensiveService by lazy {
-    ExpensiveService.create()
-}
-```
-
-### Database Queries
-
-```kotlin
-// GOOD: Select only needed columns with projections
-@Query("SELECT m.id, m.name, m.status FROM Market m WHERE m.status = :status")
-fun findActiveMarketSummaries(@Param("status") status: MarketStatus): List<MarketSummary>
-
-// BAD: Select everything
-fun findAll(): List<Market>  // Fetches all columns
-```
-
-## Testing Standards
-
-### Test Structure (AAA Pattern)
-
-```kotlin
-@Test
-fun `calculates similarity correctly`() {
-    // Arrange
-    val vector1 = doubleArrayOf(1.0, 0.0, 0.0)
-    val vector2 = doubleArrayOf(0.0, 1.0, 0.0)
-
-    // Act
-    val similarity = calculateCosineSimilarity(vector1, vector2)
-
-    // Assert
-    assertThat(similarity).isEqualTo(0.0)
-}
-```
-
-### Test Naming
-
-```kotlin
-// GOOD: Descriptive test names
-@Test fun `returns empty list when no markets match query`() { }
-@Test fun `throws exception when API key is missing`() { }
-@Test fun `falls back to substring search when Redis unavailable`() { }
-
-// BAD: Vague test names
-@Test fun `works`() { }
-@Test fun `test search`() { }
-```
-
-## Code Smell Detection
-
-Watch for these anti-patterns:
-
-### 1. Long Functions
-
-```kotlin
-// BAD: Function > 50 lines
-fun processMarketData() {
-    // 100 lines of code
-}
-
-// GOOD: Split into smaller functions
-fun processMarketData(): ProcessedData {
-    val validated = validateData()
-    val transformed = transformData(validated)
-    return saveData(transformed)
-}
-```
-
-### 2. Deep Nesting
-
-```kotlin
-// BAD: 5+ levels of nesting
-if (user != null) {
-    if (user.isAdmin) {
-        if (market != null) {
-            if (market.isActive) {
-                if (hasPermission) {
-                    // Do something
-                }
-            }
-        }
-    }
-}
-
-// GOOD: Early returns
-if (user == null) return
-if (!user.isAdmin) return
-if (market == null) return
-if (!market.isActive) return
-if (!hasPermission) return
-
-// Do something
-```
-
-### 3. Magic Numbers
-
-```kotlin
-// BAD: Unexplained numbers
-if (retryCount > 3) { }
-delay(500)
-
-// GOOD: Named constants
-const val MAX_RETRIES = 3
-const val DEBOUNCE_DELAY_MS = 500L
-
-if (retryCount > MAX_RETRIES) { }
-delay(DEBOUNCE_DELAY_MS)
-```
-
-**Remember**: Code quality is not negotiable. Clear, maintainable code enables rapid development and confident refactoring.
+- Long functions (> 50 lines)
+- Deep nesting (> 4 levels)
+- Magic numbers/strings
+- God classes (> 800 lines, too many responsibilities)
+- Feature envy (method uses another class's data more than its own)
+- Primitive obsession (String for email, Int for ID everywhere)
+- Shotgun surgery (one change requires edits in many classes)
+- Long parameter lists (> 4 parameters — use a data class/record)
