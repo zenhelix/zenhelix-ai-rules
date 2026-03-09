@@ -29,14 +29,6 @@
       {
         "type": "command",
         "command": ".rulesync/hooks/session-summary.sh"
-      },
-      {
-        "type": "command",
-        "command": ".rulesync/hooks/cost-tracker.sh"
-      },
-      {
-        "type": "command",
-        "command": ".rulesync/hooks/session-state.sh"
       }
     ]
   }

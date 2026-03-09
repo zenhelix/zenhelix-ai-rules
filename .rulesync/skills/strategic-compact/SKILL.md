@@ -41,7 +41,7 @@ Understanding what persists vs. what is lost helps you prepare:
 Before triggering compaction, ensure nothing important is lost:
 
 1. **Commit or stash changes** — any uncommitted work is safe on disk, but you may forget what was in progress
-2. **Write session notes** — record current decisions, open questions, and next steps to a session-state file or MEMORY.md
+2. **Write session notes** — record current decisions, open questions, and next steps to MEMORY.md
 3. **Note current phase** — include in the compact summary message so the resumed session knows where you are
 4. **Update TodoWrite** — mark completed items, add any newly discovered tasks
 5. **Record verbal preferences** — if the user stated preferences not in CLAUDE.md, write them to MEMORY.md

@@ -315,9 +315,9 @@ The `/learn` command triggers instinct extraction at session end:
 3. Call `record-instinct.sh` or `reinforce-instinct.sh`
 4. Report changes to the user
 
-### With session-state Hook
+### With session-summary Hook
 
-The stop hook can automatically:
+The stop hook outputs a git diff summary. After reviewing it, the `/learn` command can:
 
 1. Scan session for applied instincts
 2. Reinforce each used instinct
