@@ -4,7 +4,7 @@ build/
 !**/src/main/**
 !**/src/test/**
 
-/plugins/.kotlin
+.kotlin
 
 ### IntelliJ IDEA ###
 .idea
