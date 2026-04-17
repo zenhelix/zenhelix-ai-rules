@@ -1,0 +1,8 @@
+name: 'Build'
+
+on:
+  pull_request: {}
+
+jobs:
+  label:
+    uses: zenhelix/ci-workflows/.github/workflows/labeler.yml@v2
