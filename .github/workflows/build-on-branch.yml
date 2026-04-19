@@ -5,4 +5,4 @@ on:
 
 jobs:
   label:
-    uses: zenhelix/ci-workflows/.github/workflows/labeler.yml@v2
+    uses: zenhelix/ci-workflows/.github/workflows/labeler.yml@v3
