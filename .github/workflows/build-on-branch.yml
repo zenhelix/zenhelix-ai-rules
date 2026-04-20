@@ -3,6 +3,10 @@ name: 'Build'
 on:
   pull_request: {}
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   label:
     uses: zenhelix/ci-workflows/.github/workflows/labeler.yml@v4
