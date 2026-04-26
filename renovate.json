@@ -1,0 +1,17 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [":dependencyDashboard"],
+  "enabledManagers": ["github-actions"],
+  "schedule": ["before 9am on Monday"],
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 3,
+  "prHourlyLimit": 2,
+  "packageRules": [
+    {
+      "description": "Keep workflow action refs pinned to digest (SHA + # vN comment).",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true,
+      "rangeStrategy": "pin"
+    }
+  ]
+}
