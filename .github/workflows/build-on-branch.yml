@@ -9,4 +9,4 @@ permissions:
 
 jobs:
   label:
-    uses: zenhelix/ci-workflows/.github/workflows/labeler.yml@v4
+    uses: zenhelix/ci-workflows/.github/workflows/labeler.yml@v5
